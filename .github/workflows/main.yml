@@ -1,0 +1,80 @@
+name: Build and Deploy to ACR and App Service
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+  IMAGE_NAME: acrhelloworld
+  RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
+  WEBAPP_NAME: ${{ secrets.WEBAPP_NAME }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # 1) 코드 체크아웃
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 2) Azure 로그인
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    # 3) ACR 로그인 (관리 ID 방식)
+    - name: Login to ACR
+      run: |
+        az acr login --name ${{ secrets.ACR_LOGIN_SERVER }}
+
+    # 4) 이미지 빌드 및 태깅
+    - name: Build and tag image
+      run: |
+        # 커밋 해시를 태그로 사용
+        IMAGE_TAG=${GITHUB_SHA::8}
+        
+        # Docker 이미지 빌드
+        docker build -t $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG .
+        docker build -t $ACR_LOGIN_SERVER/$IMAGE_NAME:latest .
+
+    # 5) ACR에 이미지 푸시
+    - name: Push image to ACR
+      run: |
+        IMAGE_TAG=${GITHUB_SHA::8}
+        
+        # 버전 태그와 latest 모두 푸시
+        docker push $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG
+        docker push $ACR_LOGIN_SERVER/$IMAGE_NAME:latest
+
+    # 6) App Service 컨테이너 설정 업데이트
+    - name: Update App Service container
+      run: |
+        IMAGE_TAG=${GITHUB_SHA::8}
+        
+        # 새 이미지로 컨테이너 설정 업데이트
+        az webapp config container set \
+          --resource-group $RESOURCE_GROUP \
+          --name $WEBAPP_NAME \
+          --docker-custom-image-name $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG
+
+    # 7) App Service 재시작
+    - name: Restart App Service
+      run: |
+        az webapp restart \
+          --resource-group $RESOURCE_GROUP \
+          --name $WEBAPP_NAME
+
+    # 8) 배포 완료 확인
+    - name: Verify deployment
+      run: |
+        # 앱 상태 확인 (선택사항)
+        az webapp show \
+          --resource-group $RESOURCE_GROUP \
+          --name $WEBAPP_NAME \
+          --query "state" \
+          --output tsv
