@@ -1,7 +1,13 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 app = FastAPI()
+
+app.add_middleware(
+    TrustedHostMiddleware, 
+    allowed_hosts=["*"]  # 또는 특정 도메인만
+)
 
 class EchoReq(BaseModel):
     message: str
