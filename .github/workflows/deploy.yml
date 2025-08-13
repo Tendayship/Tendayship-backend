@@ -51,16 +51,22 @@ jobs:
         docker push $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG
         docker push $ACR_LOGIN_SERVER/$IMAGE_NAME:latest
 
-    # 6) App Service 컨테이너 설정 업데이트
+    # 6) App Service 컨테이너 설정 업데이트 (수정)
     - name: Update App Service container
       run: |
         IMAGE_TAG=${GITHUB_SHA::8}
+        
+        # 기존 컨테이너 완전 중지
+        az webapp stop --resource-group $RESOURCE_GROUP --name $WEBAPP_NAME
         
         # 새 이미지로 컨테이너 설정 업데이트
         az webapp config container set \
           --resource-group $RESOURCE_GROUP \
           --name $WEBAPP_NAME \
           --docker-custom-image-name $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG
+        
+        # 앱 재시작 (클린 상태)
+        az webapp start --resource-group $RESOURCE_GROUP --name $WEBAPP_NAME
 
     # 7) App Service 재시작
     - name: Restart App Service
