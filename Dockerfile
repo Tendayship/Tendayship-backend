@@ -1,25 +1,16 @@
-FROM mcr.microsoft.com/dotnet/core/aspnet:2.2 AS base
-# Update <acrName> with the name of your registry
-# Example: uniqueregistryname.azurecr.io
-ENV DOCKER_REGISTRY=tendayres.azurecr.io
-ENV ASPNETCORE_URLS=http://0.0.0.0:80
+FROM python:3.12-slim AS base
+ENV PYTHONUNBUFFERED=1 \
+    POETRY_VERSION=0  # pip 사용
+
 WORKDIR /app
+
+# 필수 패키지 설치
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY main.py .
+
+# FastAPI + Uvicorn 실행 (80 포트)
+ENV PORT=80
 EXPOSE 80
-
-FROM mcr.microsoft.com/dotnet/core/sdk:2.2 AS build
-WORKDIR /src
-COPY *.sln ./
-COPY AcrHelloworld/AcrHelloworld.csproj AcrHelloworld/
-COPY docker-compose.dcproj ./
-RUN dotnet restore AcrHelloworld/AcrHelloworld.csproj
-COPY . .
-WORKDIR /src/AcrHelloworld
-RUN dotnet build -c Release -o /app
-
-FROM build AS publish
-RUN dotnet publish -c Release -o /app
-
-FROM base AS production
-WORKDIR /app
-COPY --from=publish /app .
-ENTRYPOINT ["dotnet", "AcrHelloworld.dll"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
