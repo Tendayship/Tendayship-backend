@@ -8,7 +8,7 @@ on:
 
 env:
   ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
-  IMAGE_NAME: acrhelloworld
+  IMAGE_NAME: tendayship
   RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
   WEBAPP_NAME: ${{ secrets.WEBAPP_NAME }}
 
