@@ -51,7 +51,7 @@ jobs:
         docker push $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG
         docker push $ACR_LOGIN_SERVER/$IMAGE_NAME:latest
 
-    # 6) App Service 컨테이너 설정 업데이트 (수정)
+    # 6) App Service 컨테이너 설정 업데이트
     - name: Update App Service container
       run: |
         IMAGE_TAG=${GITHUB_SHA::8}
