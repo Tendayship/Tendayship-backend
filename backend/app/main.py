@@ -292,16 +292,20 @@ if getattr(settings, 'DEBUG', True):
 # 에러 페이지 (404 등)
 @app.exception_handler(404)
 async def not_found_handler(request, exc):
-    return {
-        "detail": "Not Found",
-        "message": f"The path '{request.url.path}' was not found",
-        "available_endpoints": {
-            "docs": "/docs",
-            "redoc": "/redoc", 
-            "health": "/health",
-            "api_status": "/api/status"
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=404,
+        content={
+            "detail": "Not Found",
+            "message": f"The path '{request.url.path}' was not found",
+            "available_endpoints": {
+                "docs": "/docs",
+                "redoc": "/redoc", 
+                "health": "/health",
+                "api_status": "/api/status"
+            }
         }
-    }
+    )
 
 # 앱 정보 출력 (서버 시작 시)
 if __name__ == "__main__":

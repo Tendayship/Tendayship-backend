@@ -1,7 +1,8 @@
 from typing import Optional, List
 from datetime import date, datetime
 from decimal import Decimal
-from pydantic import BaseModel, Field
+from uuid import UUID
+from pydantic import BaseModel, Field, field_serializer
 from enum import Enum
 
 class SubscriptionStatusEnum(str, Enum):
@@ -40,6 +41,10 @@ class SubscriptionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
+    @field_serializer('id', 'group_id', 'user_id')
+    def serialize_uuid_fields(self, value: UUID) -> str:
+        return str(value)
+    
     class Config:
         from_attributes = True
 
@@ -58,6 +63,10 @@ class PaymentResponse(BaseModel):
     status: PaymentStatusEnum
     payment_method: PaymentMethodEnum
     paid_at: Optional[datetime] = None
+    
+    @field_serializer('id', 'subscription_id')
+    def serialize_uuid_fields(self, value: UUID) -> str:
+        return str(value)
     
     class Config:
         from_attributes = True

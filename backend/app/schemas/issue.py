@@ -1,6 +1,7 @@
 from typing import Optional, List
 from datetime import date, datetime
-from pydantic import BaseModel, Field
+from uuid import UUID
+from pydantic import BaseModel, Field, field_serializer
 from enum import Enum
 
 class IssueStatusEnum(str, Enum):
@@ -30,6 +31,10 @@ class CurrentIssueResponse(BaseModel):
     max_posts: int = 20
     created_at: datetime
     
+    @field_serializer('id', 'group_id')
+    def serialize_uuid_fields(self, value: UUID) -> str:
+        return str(value)
+    
     class Config:
         from_attributes = True
 
@@ -41,6 +46,10 @@ class IssueListResponse(BaseModel):
     status: IssueStatusEnum
     post_count: int
     published_at: Optional[datetime] = None
+    
+    @field_serializer('id')
+    def serialize_uuid_fields(self, value: UUID) -> str:
+        return str(value)
     
     class Config:
         from_attributes = True

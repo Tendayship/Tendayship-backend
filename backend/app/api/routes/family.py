@@ -11,8 +11,100 @@ from ...schemas.family import (
     FamilyGroupCreate, 
     FamilyGroupResponse
 )
+from ...schemas.user import FamilyGroupSetup
+from ...services.auth_service import kakao_oauth_service
 
 router = APIRouter(prefix="/family", tags=["family"])
+
+@router.post("/setup", response_model=dict)
+async def setup_family_group(
+    setup_data: FamilyGroupSetup,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    가족 그룹 초기 설정 (새 사용자용)
+    
+    1. 사용자가 이미 다른 그룹에 속해있는지 확인
+    2. 받는 분 정보 생성
+    3. 가족 그룹 생성
+    4. 리더를 첫 번째 멤버로 추가
+    """
+    
+    # 1. 기존 그룹 멤버십 확인
+    existing_membership = await family_member_crud.check_user_membership(
+        db, current_user.id
+    )
+    if existing_membership:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이미 다른 가족 그룹에 속해있습니다"
+        )
+    
+    try:
+        # 2. 받는 분 정보 생성
+        recipient_data = {
+            "name": setup_data.recipient_name,
+            "address": setup_data.recipient_address,
+            "postal_code": setup_data.recipient_postal_code or "00000",
+            "phone": setup_data.recipient_phone or current_user.phone,
+            "relationship": setup_data.leader_relationship
+        }
+        
+        db_recipient = await recipient_crud.create(db, recipient_data)
+        
+        # 3. 가족 그룹 생성
+        group_data = {
+            "group_name": setup_data.group_name,
+            "leader_id": current_user.id,
+            "deadline_type": setup_data.deadline_type,
+            "leader_relationship": setup_data.leader_relationship
+        }
+        
+        db_group = await family_group_crud.create_with_leader(
+            db, group_data, current_user.id
+        )
+        
+        # 받는 분에 그룹 ID 설정
+        db_recipient.group_id = db_group.id
+        await db.commit()
+        
+        # 4. 리더를 첫 번째 멤버로 추가
+        await family_member_crud.create_member(
+            db=db,
+            user_id=current_user.id,
+            group_id=db_group.id,
+            recipient_id=db_recipient.id,
+            relationship=setup_data.leader_relationship,
+            role="LEADER"
+        )
+        
+        await db.commit()
+        await db.refresh(db_group)
+        
+        return {
+            "message": "가족 그룹이 성공적으로 생성되었습니다",
+            "group": {
+                "id": str(db_group.id),
+                "group_name": db_group.group_name,
+                "invite_code": db_group.invite_code,
+                "deadline_type": db_group.deadline_type,
+                "status": db_group.status
+            },
+            "recipient": {
+                "id": str(db_recipient.id),
+                "name": db_recipient.name,
+                "address": db_recipient.address,
+                "postal_code": db_recipient.postal_code
+            }
+        }
+        
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"가족 그룹 설정 중 오류가 발생했습니다: {str(e)}"
+        )
 
 @router.post("/create", response_model=FamilyGroupResponse)
 async def create_family_group(

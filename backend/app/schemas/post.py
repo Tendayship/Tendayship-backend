@@ -1,6 +1,7 @@
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field, validator
+from uuid import UUID
+from pydantic import BaseModel, Field, validator, field_serializer
 from enum import Enum
 
 # 소식 작성 요청
@@ -35,6 +36,10 @@ class PostResponse(BaseModel):
     author_name: Optional[str] = None
     author_relationship: Optional[str] = None
     author_profile_image: Optional[str] = None
+    
+    @field_serializer('id', 'issue_id', 'author_id')
+    def serialize_uuid_fields(self, value: UUID) -> str:
+        return str(value)
     
     class Config:
         from_attributes = True

@@ -1,25 +1,26 @@
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime, date
-from pydantic import BaseModel, Field
+from uuid import UUID
+from pydantic import BaseModel, Field, field_serializer, field_validator
 from enum import Enum
 
 class DeadlineTypeEnum(str, Enum):
-    SECOND_WEEK = "second_week"  # 매월 둘째 주 일요일
-    FOURTH_WEEK = "fourth_week"  # 매월 넷째 주 일요일
+    SECOND_SUNDAY = "SECOND_SUNDAY"  # 매월 둘째 주 일요일
+    FOURTH_SUNDAY = "FOURTH_SUNDAY"  # 매월 넷째 주 일요일
 
 class GroupStatusEnum(str, Enum):
-    ACTIVE = "active"
-    INACTIVE = "inactive"
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"
 
 class RelationshipTypeEnum(str, Enum):
-    DAUGHTER = "daughter"
-    SON = "son"
-    DAUGHTER_IN_LAW = "daughter_in_law"
-    SON_IN_LAW = "son_in_law"
+    DAUGHTER = "DAUGHTER"
+    SON = "SON"
+    DAUGHTER_IN_LAW = "DAUGHTER_IN_LAW"
+    SON_IN_LAW = "SON_IN_LAW"
 
 class MemberRoleEnum(str, Enum):
-    LEADER = "leader"
-    MEMBER = "member"
+    LEADER = "LEADER"
+    MEMBER = "MEMBER"
 
 # 가족 그룹 생성 요청 (MVP 기준)
 class FamilyGroupCreate(BaseModel):
@@ -29,14 +30,26 @@ class FamilyGroupCreate(BaseModel):
 
 # 가족 그룹 응답
 class FamilyGroupResponse(BaseModel):
-    id: str
+    id: Union[str, UUID]
     group_name: str
-    leader_id: str
+    leader_id: Union[str, UUID]
     invite_code: str
     deadline_type: DeadlineTypeEnum
     status: GroupStatusEnum
     created_at: datetime
     updated_at: datetime
+    
+    @field_validator('id', 'leader_id', mode='before')
+    @classmethod
+    def validate_uuid_fields(cls, value):
+        """UUID나 문자열을 문자열로 변환"""
+        if isinstance(value, UUID):
+            return str(value)
+        return value
+    
+    @field_serializer('id', 'leader_id')
+    def serialize_uuid_fields(self, value) -> str:
+        return str(value)
     
     class Config:
         from_attributes = True
@@ -48,10 +61,10 @@ class MemberJoinRequest(BaseModel):
 
 # 가족 멤버 응답
 class FamilyMemberResponse(BaseModel):
-    id: str
-    group_id: str
-    user_id: str
-    recipient_id: str
+    id: Union[str, UUID]
+    group_id: Union[str, UUID]
+    user_id: Union[str, UUID]
+    recipient_id: Union[str, UUID]
     member_relationship: RelationshipTypeEnum
     role: MemberRoleEnum
     joined_at: datetime
@@ -59,6 +72,18 @@ class FamilyMemberResponse(BaseModel):
     # 사용자 정보 포함
     user_name: Optional[str] = None
     user_profile_image: Optional[str] = None
+    
+    @field_validator('id', 'group_id', 'user_id', 'recipient_id', mode='before')
+    @classmethod
+    def validate_uuid_fields(cls, value):
+        """UUID나 문자열을 문자열로 변환"""
+        if isinstance(value, UUID):
+            return str(value)
+        return value
+    
+    @field_serializer('id', 'group_id', 'user_id', 'recipient_id')
+    def serialize_uuid_fields(self, value) -> str:
+        return str(value)
     
     class Config:
         from_attributes = True

@@ -39,7 +39,6 @@ class BookCRUD(BaseCRUD[Book, BookCreate, dict]):
             .join(Issue)
             .where(Issue.group_id == group_id)
             .options(
-                joinedload(Book.issue),
                 selectinload(Book.issue).selectinload(Issue.posts)
             )
             .order_by(Book.created_at.desc())
@@ -83,7 +82,6 @@ class BookCRUD(BaseCRUD[Book, BookCreate, dict]):
                 )
             )
             .options(
-                joinedload(Book.issue).joinedload(Issue.group),
                 joinedload(Book.issue).joinedload(Issue.group).joinedload(Issue.group.recipient)
             )
             .order_by(Book.created_at.desc())

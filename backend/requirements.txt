@@ -1,8 +1,8 @@
 fastapi                    
 uvicorn[standard]         
 pydantic
-pydantic[email]                   
-pydantic-settings         
+pydantic[email]               
+pydantic-settings     
 python-jose[cryptography]
 python-multipart
 
@@ -22,9 +22,8 @@ azure-ai-contentsafety
 tzdata
 reportlab
 python-dotenv               
-httpx                    
+httpx                     
 Pillow                 
 redis                       
 PyPDF2
-
-black                 
+black

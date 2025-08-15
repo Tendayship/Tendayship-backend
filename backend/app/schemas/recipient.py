@@ -1,6 +1,7 @@
 from typing import Optional
 from datetime import date, datetime
-from pydantic import BaseModel, Field, validator
+from uuid import UUID
+from pydantic import BaseModel, Field, validator, field_serializer
 
 class RecipientBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="받는 분 이름")
@@ -40,6 +41,10 @@ class RecipientResponse(RecipientBase):
     profile_image_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    
+    @field_serializer('id', 'group_id')
+    def serialize_uuid_fields(self, value: UUID) -> str:
+        return str(value)
     
     class Config:
         from_attributes = True
