@@ -32,8 +32,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # 애플리케이션 코드 복사
 COPY . .
 
-# 포트 80 노출
-EXPOSE 80
+# 포트 8080 노출
+EXPOSE 8080
 
 # 헬스체크 추가
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
@@ -45,4 +45,4 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
 USER appuser
 
 # 애플리케이션 실행
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
