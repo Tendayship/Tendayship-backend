@@ -151,17 +151,17 @@ class Settings(BaseSettings):
     )
 
     PAYMENT_SUCCESS_URL: str = Field(
-    default="http://localhost:8000/api/subscription/approve", 
+    default="https://tendayapp-f0a0drg2b6avh8g3.koreacentral-01.azurewebsites.net/api/subscription/approve",
     env="PAYMENT_SUCCESS_URL"
     )
 
     PAYMENT_CANCEL_URL: str = Field(
-        default="http://localhost:8000/api/subscription/cancel", 
-        env="PAYMENT_CANCEL_URL"
+        default="https://tendayapp-f0a0drg2b6avh8g3.koreacentral-01.azurewebsites.net/api/subscription/cancel",
+        env="PAYMENT_CANCEL_URL"  
     )
 
     PAYMENT_FAIL_URL: str = Field(
-        default="http://localhost:8000/api/subscription/fail", 
+        default="https://tendayapp-f0a0drg2b6avh8g3.koreacentral-01.azurewebsites.net/api/subscription/fail",
         env="PAYMENT_FAIL_URL"
     )
     
