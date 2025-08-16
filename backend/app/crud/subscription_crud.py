@@ -27,7 +27,7 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
             )
             .options(
                 selectinload(Subscription.payments),
-                joinedload(Subscription.user),
+                joinedload(Subscription.payer),
                 joinedload(Subscription.group)
             )
         )
@@ -93,7 +93,7 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
             .having(func.count(Payment.id) < retry_limit)
             .options(
                 selectinload(Subscription.payments),
-                joinedload(Subscription.user)
+                joinedload(Subscription.payer)
             )
         )
         return result.scalars().all()

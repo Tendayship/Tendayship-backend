@@ -1,9 +1,10 @@
-from typing import Optional, List
+from typing import Optional
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 from pydantic import BaseModel, Field, field_serializer
 from enum import Enum
+
 
 class SubscriptionStatusEnum(str, Enum):
     ACTIVE = "active"
@@ -53,7 +54,26 @@ class PaymentRequest(BaseModel):
     subscription_id: str = Field(..., description="구독 ID")
     amount: Decimal = Field(..., description="결제 금액")
     payment_method: PaymentMethodEnum = Field(..., description="결제 수단")
-    
+
+class PaymentReadyResponse(BaseModel):
+    """결제 준비 응답"""
+    tid: str = Field(..., description="결제 고유번호")
+    next_redirect_pc_url: str = Field(..., description="PC 결제 페이지 URL")
+    next_redirect_mobile_url: str = Field(..., description="모바일 결제 페이지 URL")
+    partner_order_id: str = Field(..., description="가맹점 주문번호")
+
+class PaymentApproveRequest(BaseModel):
+    """결제 승인 요청"""
+    tid: str = Field(..., description="결제 고유번호")
+    pg_token: str = Field(..., description="결제 승인 토큰")
+
+class PaymentCancelRequest(BaseModel):
+    """결제 취소 요청"""
+    tid: str = Field(..., description="결제 고유번호")
+    cancel_amount: int = Field(..., description="취소 금액")
+    cancel_reason: str = Field(default="사용자 요청", description="취소 사유")
+
+
 # 결제 응답
 class PaymentResponse(BaseModel):
     id: str

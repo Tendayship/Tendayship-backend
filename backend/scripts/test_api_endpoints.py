@@ -171,7 +171,7 @@ class EnhancedAPITestRunner:
         endpoints = [
             ("GET", "/", 200, "루트 엔드포인트"),
             ("GET", "/health", 200, "헬스 체크"),
-            ("GET", "/api/v1/auth/kakao/url", 200, "카카오 로그인 URL"),
+            ("GET", "/api/auth/kakao/url", 200, "카카오 로그인 URL"),
             ("GET", "/docs", 200, "Swagger UI"),
             ("GET", "/redoc", 200, "ReDoc 문서"),
         ]
@@ -186,7 +186,7 @@ class EnhancedAPITestRunner:
     def test_auth_structure(self):
         """카카오 OAuth 구조 테스트"""
         # 카카오 로그인 URL 테스트
-        response = self.make_request("GET", "/api/v1/auth/kakao/url")
+        response = self.make_request("GET", "/api/auth/kakao/url")
         if response.status_code == 200:
             data = response.json()
             if "login_url" in data and "kauth.kakao.com" in data["login_url"]:
@@ -203,11 +203,11 @@ class EnhancedAPITestRunner:
     def test_authenticated_endpoints(self):
         """인증 필요 엔드포인트 테스트"""
         endpoints = [
-            ("GET", "/api/v1/profile/me", "내 프로필"),
-            ("GET", "/api/v1/family/my-group", "내 가족 그룹"),
-            ("GET", "/api/v1/posts/", "소식 목록"),
-            ("GET", "/api/v1/books/", "책자 목록"),
-            ("GET", "/api/v1/subscription/my", "내 구독 목록"),
+            ("GET", "/api/profile/me", "내 프로필"),
+            ("GET", "/api/family/my-group", "내 가족 그룹"),
+            ("GET", "/api/posts/", "소식 목록"),
+            ("GET", "/api/books/", "책자 목록"),
+            ("GET", "/api/subscription/my", "내 구독 목록"),
         ]
         
         for method, path, description in endpoints:
@@ -232,9 +232,9 @@ class EnhancedAPITestRunner:
     def test_error_cases(self):
         """에러 케이스 테스트"""
         error_cases = [
-            ("GET", "/api/v1/nonexistent", 404, "존재하지 않는 엔드포인트"),
-            ("POST", "/api/v1/posts/", 403, "비인증 소식 작성"),
-            ("DELETE", "/api/v1/members/bad-id", 403, "비인증 멤버 삭제"),
+            ("GET", "/api/nonexistent", 404, "존재하지 않는 엔드포인트"),
+            ("POST", "/api/posts/", 403, "비인증 소식 작성"),
+            ("DELETE", "/api/members/bad-id", 403, "비인증 멤버 삭제"),
         ]
         
         for method, path, expected_status, description in error_cases:
@@ -304,18 +304,18 @@ class EnhancedAPITestRunner:
         
         # 상세한 성공/실패 개수 계산을 위해 다시 테스트
         public_success = self.count_successful_endpoints([
-            ("/", 200), ("/health", 200), ("/api/v1/auth/kakao/url", 200), 
+            ("/", 200), ("/health", 200), ("/api/auth/kakao/url", 200), 
             ("/docs", 200), ("/redoc", 200)
         ])
         
         auth_success = self.count_successful_auth_endpoints([
-            "/api/v1/profile/me", "/api/v1/family/my-group", "/api/v1/posts/", 
-            "/api/v1/books/", "/api/v1/subscription/my"
+            "/api/profile/me", "/api/family/my-group", "/api/v1/posts/", 
+            "/api/books/", "/api/subscription/my"
         ])
         
         error_success = self.count_successful_error_cases([
-            ("/api/v1/nonexistent", 404), ("/api/v1/posts/", 403), 
-            ("/api/v1/members/bad-id", 403)
+            ("/api/nonexistent", 404), ("/api/posts/", 403), 
+            ("/api/members/bad-id", 403)
         ])
         
         for suite_name, result in self.test_results.items():

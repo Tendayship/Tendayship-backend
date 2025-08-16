@@ -126,12 +126,57 @@ class Settings(BaseSettings):
     )
 
     # ===== 카카오페이 설정 =====
-    KAKAO_PAY_ADMIN_KEY: str = ""
-    KAKAO_PAY_CID: str = "TC0ONETIME"  # 테스트용 CID
+    KAKAO_PAY_SECRET_KEY: str = Field(
+        default="",
+        env="KAKAO_PAY_SECRET_KEY",
+        description="카카오페이 시크릿 키 (DEV용)"
+    )
     
-    # ===== PG사 설정 ===== 
-    PG_MERCHANT_ID: str = ""
-    PG_SECRET_KEY: str = ""
+    KAKAO_PAY_CID: str = Field(
+        default="TC0ONETIME",  # 테스트용 CID
+        env="KAKAO_PAY_CID",
+        description="카카오페이 가맹점 코드"
+    )
+
+    KAKAO_PAY_CID_SUBSCRIPTION: str = Field(
+        default="TCSUBSCRIP",  # 정기결제 테스트용 CID
+        env="KAKAO_PAY_CID_SUBSCRIPTION",
+        description="카카오페이 정기결제용 가맹점 코드"
+    )
+
+    KAKAO_PAY_API_HOST: str = Field(
+        default="https://open-api.kakaopay.com",
+        env="KAKAO_PAY_API_HOST",
+        description="카카오페이 API 호스트"
+    )
+
+    PAYMENT_SUCCESS_URL: str = Field(
+    default="http://localhost:8000/api/subscription/approve", 
+    env="PAYMENT_SUCCESS_URL"
+    )
+
+    PAYMENT_CANCEL_URL: str = Field(
+        default="http://localhost:8000/api/subscription/cancel", 
+        env="PAYMENT_CANCEL_URL"
+    )
+
+    PAYMENT_FAIL_URL: str = Field(
+        default="http://localhost:8000/api/subscription/fail", 
+        env="PAYMENT_FAIL_URL"
+    )
+    
+    # 결제 모드 (테스트/실제)
+    PAYMENT_MODE: str = Field(
+        default="TEST",
+        env="PAYMENT_MODE",
+        description="TEST or PRODUCTION"
+    )
+    
+    # 기존 설정 유지
+    PAYMENT_MONTHLY_AMOUNT: int = Field(
+        default=6900,
+        description="월 구독료 (원)"
+    )
     
     # ===== 프론트엔드 URL =====
     FRONTEND_URL: str = "http://localhost:3000"
@@ -180,15 +225,22 @@ class Settings(BaseSettings):
     
     class Config:
         """Pydantic 설정"""
-        env_file = ".env"  # .env 파일에서 환경 변수를 자동으로 읽습니다
+        env_file = ".env" 
         env_file_encoding = "utf-8"
-        case_sensitive = True  # 환경 변수 이름의 대소문자를 구분합니다
+        case_sensitive = True  
         
     @validator("SECRET_KEY")
     def validate_secret_key(cls, v):
         """비밀 키가 충분히 안전한지 검증합니다"""
         if len(v) < 32:
             raise ValueError("SECRET_KEY는 최소 32자 이상이어야 합니다")
+        return v
+    
+    @validator("KAKAO_PAY_SECRET_KEY")
+    def validate_kakao_pay_key(cls, v, values):
+        """결제 모드가 PRODUCTION일 때 키 필수"""
+        if values.get("PAYMENT_MODE") == "PRODUCTION" and not v:
+            raise ValueError("Production 모드에서는 KAKAO_PAY_SECRET_KEY가 필수입니다")
         return v
     
     @validator("ALLOWED_HOSTS", pre=True)
