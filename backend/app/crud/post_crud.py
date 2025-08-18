@@ -128,6 +128,13 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
             
         except Exception as e:
             return []
-
+    async def delete(self, db: AsyncSession, post_id: str):
+            """게시글(Post) DB에서 삭제"""
+            post = await db.get(Post, post_id)
+            if post is None:
+                return False   # posts.py에서 404 예외 발생
+            await db.delete(post)
+            await db.commit()
+            return True
 # 싱글톤 인스턴스
 post_crud = PostCRUD(Post)

@@ -317,7 +317,7 @@ async def delete_post(
                 logger.error(f"레거시 이미지 삭제 중 오류 (계속 진행): {str(e)}")
 
         # 3. 소식 삭제
-        await post_crud.remove(db, id=post_id)
+        await post_crud.delete(db, post_id)
 
         return {"message": "소식이 성공적으로 삭제되었습니다"}
 
