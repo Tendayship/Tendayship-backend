@@ -21,6 +21,41 @@ class PostCreate(BaseModel):
             raise ValueError('소식 내용은 최대 1000자까지 가능합니다')
         return v.strip()
 
+class PostCreateWithImages(BaseModel):
+    content: str = Field(..., min_length=10, max_length=1000, description="소식 내용")
+    image_urls: List[str] = Field(default=[], max_items=4, description="이미지 URL 목록")
+    image_blob_keys: List[str] = Field(default=[], max_items=4, description="이미지 블롭 키 목록")
+
+    @validator('image_urls')
+    def validate_image_urls(cls, v):
+        if len(v) > 4:
+            raise ValueError('최대 4개의 이미지만 업로드 가능합니다')
+        return v
+
+    @validator('image_blob_keys')
+    def validate_image_blob_keys(cls, v):
+        if len(v) > 4:
+            raise ValueError('최대 4개의 이미지 블롭 키만 가능합니다')
+        return v
+    
+    @validator('content')
+    def validate_content(cls, v):
+        if not v or len(v.strip()) < 10:
+            raise ValueError('소식 내용은 최소 10자 이상이어야 합니다')
+        if len(v) > 1000:
+            raise ValueError('소식 내용은 최대 1000자까지 가능합니다')
+        return v.strip()
+
+    @model_validator(mode='after')
+    def validate_image_consistency(cls, values):
+        image_urls = values.image_urls or []
+        image_blob_keys = values.image_blob_keys or []
+        
+        if len(image_urls) != len(image_blob_keys):
+            raise ValueError('이미지 URL과 블롭 키 개수가 일치하지 않습니다')
+        
+        return values
+
 class PostUpdate(BaseModel):
     content: Optional[str] = Field(None, min_length=50, max_length=100)
     image_urls: Optional[List[str]] = Field(None, min_items=1, max_items=4)

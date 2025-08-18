@@ -16,7 +16,7 @@ class PostStorageService:
         issue_id: str,
         post_id: str,
         files: List[UploadFile]
-    ) -> List[str]:
+    ) -> tuple[List[str], List[str]]:
         """소식 이미지들을 Azure Blob Storage에 업로드"""
         max_images = getattr(settings, 'MAX_IMAGES_PER_POST', 4)
         
@@ -27,6 +27,7 @@ class PostStorageService:
             )
 
         uploaded_urls = []
+        blob_keys = []
         
         for i, file in enumerate(files):
             # 파일 검증
@@ -35,7 +36,7 @@ class PostStorageService:
             # Azure Blob Storage에 업로드
             try:
                 storage_service = get_storage_service()
-                image_url = storage_service.upload_post_image(
+                image_url, blob_key = storage_service.upload_post_image(
                     group_id=group_id,
                     issue_id=issue_id,
                     post_id=post_id,
@@ -43,6 +44,7 @@ class PostStorageService:
                     image_index=i
                 )
                 uploaded_urls.append(image_url)
+                blob_keys.append(blob_key)
                 
             except Exception as e:
                 raise HTTPException(
@@ -50,7 +52,7 @@ class PostStorageService:
                     detail=f"이미지 업로드 실패: {str(e)}"
                 )
 
-        return uploaded_urls
+        return uploaded_urls, blob_keys
 
     async def upload_profile_image(self, user_id: str, file: UploadFile) -> str:
         """프로필 이미지 업로드"""

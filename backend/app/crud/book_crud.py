@@ -31,6 +31,7 @@ class BookCRUD(BaseCRUD[Book, BookCreate, dict]):
         self,
         db: AsyncSession,
         group_id: str,
+        skip: int = 0,
         limit: int = 10
     ) -> List[Book]:
         """그룹의 책자 목록 조회"""
@@ -42,6 +43,7 @@ class BookCRUD(BaseCRUD[Book, BookCreate, dict]):
                 selectinload(Book.issue).selectinload(Issue.posts)
             )
             .order_by(Book.created_at.desc())
+            .offset(skip)
             .limit(limit)
         )
         return result.scalars().all()
@@ -103,8 +105,7 @@ class BookCRUD(BaseCRUD[Book, BookCreate, dict]):
                 book.pdf_url = pdf_url
             if status == ProductionStatus.COMPLETED:
                 book.produced_at = datetime.now()
-            await db.commit()
-            await db.refresh(book)
+            # Transaction management moved to upper layer
         return book
 
 # 싱글톤 인스턴스

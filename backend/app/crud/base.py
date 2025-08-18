@@ -28,8 +28,7 @@ class BaseCRUD(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         obj_data = obj_in.dict() if hasattr(obj_in, 'dict') else obj_in
         db_obj = self.model(**obj_data)
         db.add(db_obj)
-        await db.commit()
-        await db.refresh(db_obj)
+        # Transaction management moved to upper layer
         return db_obj
 
     async def update(
@@ -43,15 +42,14 @@ class BaseCRUD(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         for field in obj_data:
             if hasattr(db_obj, field):
                 setattr(db_obj, field, obj_data[field])
-        
-        await db.commit()
-        await db.refresh(db_obj)
+        # Transaction management moved to upper layer
         return db_obj
 
-    async def remove(self, db: AsyncSession, *, id: Any) -> ModelType:
+    async def remove(self, db: AsyncSession, *, id: Any) -> bool:
         result = await db.execute(select(self.model).where(self.model.id == id))
         obj = result.scalars().first()
-        if obj:
-            await db.delete(obj)
-            await db.commit()
-        return obj
+        if not obj:
+            return False
+        await db.delete(obj)
+        # Transaction management moved to upper layer
+        return True

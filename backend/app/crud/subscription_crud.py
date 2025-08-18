@@ -126,9 +126,7 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
         )
         
         db.add(subscription)
-        await db.commit()
-        await db.refresh(subscription)
-        
+        # Transaction management moved to upper layer
         return subscription
     
     async def cancel_subscription(
@@ -146,9 +144,7 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
         subscription.end_date = date.today()
         subscription.cancel_reason = reason
         
-        await db.commit()
-        await db.refresh(subscription)
-        
+        # Transaction management moved to upper layer
         return subscription
 
 class PaymentCRUD(BaseCRUD[Payment, dict, dict]):
@@ -175,16 +171,8 @@ class PaymentCRUD(BaseCRUD[Payment, dict, dict]):
             payment.paid_at = datetime.now()
         
         db.add(payment)
-        await db.commit()
-        await db.refresh(payment)
-        
-        # 결제 성공 시 구독의 다음 결제일 업데이트
-        if status == PaymentStatus.SUCCESS:
-            subscription = await subscription_crud.get(db, subscription_id)
-            if subscription:
-                subscription.next_billing_date = subscription.next_billing_date + timedelta(days=30)
-                await db.commit()
-        
+        # Transaction management moved to upper layer
+        # Note: Subscription update should be handled in service layer
         return payment
     
     async def get_by_subscription(

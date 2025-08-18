@@ -11,6 +11,7 @@ from ...schemas.family import (
     MemberJoinRequest,
     FamilyMemberResponse
 )
+from ...core.constants import ROLE_LEADER, ROLE_MEMBER, MAX_GROUP_MEMBERS
 
 router = APIRouter(prefix="/members", tags=["members"])
 
@@ -53,10 +54,10 @@ async def join_family_group(
     current_members = await family_member_crud.get_group_members(
         db, group.id
     )
-    if len(current_members) >= 20:
+    if len(current_members) >= MAX_GROUP_MEMBERS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="가족 그룹 멤버 수가 최대 제한(20명)에 도달했습니다"
+            detail=f"가족 그룹 멤버 수가 최대 제한({MAX_GROUP_MEMBERS}명)에 도달했습니다"
         )
     
     # 4. 멤버로 추가
@@ -66,8 +67,8 @@ async def join_family_group(
             user_id=current_user.id,
             group_id=group.id,
             recipient_id=group.recipient.id,
-            member_relationship=join_data.relationship,
-            role="member"
+            relationship=join_data.relationship,
+            role=ROLE_MEMBER
         )
         
         return new_member
@@ -97,7 +98,7 @@ async def validate_invite_code(invite_code: str, db: AsyncSession = Depends(get_
         "valid": True,
         "group_name": group.group_name,
         "current_member_count": len(current_members),
-        "max_members": 20,
+        "max_members": MAX_GROUP_MEMBERS,
         "recipient_name": group.recipient.name
     }
 
@@ -146,7 +147,7 @@ async def remove_member(
         db, current_user.id, target_member.group_id
     )
     
-    if not current_membership or current_membership.role != "leader":
+    if not current_membership or current_membership.role != ROLE_LEADER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="그룹 리더만 멤버를 제거할 수 있습니다"

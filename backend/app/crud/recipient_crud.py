@@ -32,9 +32,7 @@ class RecipientCRUD(BaseCRUD[Recipient, RecipientCreate, RecipientUpdate]):
         )
         
         db.add(db_recipient)
-        await db.commit()
-        await db.refresh(db_recipient)
-        
+        # Transaction management moved to upper layer
         return db_recipient
 
 # 싱글톤 인스턴스 생성

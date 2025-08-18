@@ -19,6 +19,7 @@ from ...schemas.subscription import (
     PaymentReadyResponse,  # 새로 추가
     PaymentApproveRequest   # 새로 추가
 )
+from ...core.constants import ROLE_LEADER
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/subscription", tags=["subscription"])
@@ -40,7 +41,7 @@ async def ready_payment(
 
     # 2. 그룹 리더인지 확인 (Enum 처리)
     role_value = membership.role.value if hasattr(membership.role, 'value') else str(membership.role)
-    if role_value != "LEADER":
+    if role_value != ROLE_LEADER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="그룹 리더만 구독을 생성할 수 있습니다"

@@ -10,6 +10,7 @@ from ...crud.book_crud import book_crud
 from ...crud.member_crud import family_member_crud
 from ...services.pdf_service import pdf_service
 from ...schemas.book import BookResponse
+from ...core.constants import ROLE_LEADER
 
 router = APIRouter(prefix="/books", tags=["books"])
 
@@ -37,7 +38,13 @@ async def get_my_books(
     result = []
     for book in books:
         book_data = {
-            **book.__dict__,
+            "id": book.id,
+            "issue_id": book.issue_id,
+            "pdf_url": book.pdf_url,
+            "status": book.status,
+            "delivery_status": book.delivery_status,
+            "created_at": book.created_at,
+            "updated_at": book.updated_at,
             "issue_number": book.issue.issue_number,
             "issue_deadline": book.issue.deadline_date,
             "post_count": len(book.issue.posts) if book.issue.posts else 0
@@ -72,7 +79,13 @@ async def get_book_detail(
         )
     
     book_data = {
-        **book.__dict__,
+        "id": book.id,
+        "issue_id": book.issue_id,
+        "pdf_url": book.pdf_url,
+        "status": book.status,
+        "delivery_status": book.delivery_status,
+        "created_at": book.created_at,
+        "updated_at": book.updated_at,
         "issue_number": book.issue.issue_number,
         "issue_deadline": book.issue.deadline_date,
         "post_count": len(book.issue.posts) if book.issue.posts else 0
@@ -133,7 +146,7 @@ async def regenerate_book_pdf(
     membership = await family_member_crud.get_by_user_and_group(
         db, current_user.id, book.issue.group_id
     )
-    if not membership or membership.role != "leader":
+    if not membership or membership.role != ROLE_LEADER:
         # TODO: 관리자 권한도 확인
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

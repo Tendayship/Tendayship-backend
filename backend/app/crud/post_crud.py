@@ -15,31 +15,32 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
         db: AsyncSession,
         post_data: PostCreate,
         author_id: str,
-        issue_id: str
+        issue_id: str,
+        image_urls: List[str] = None,
+        image_blob_keys: List[str] = None
     ) -> Post:
         """새 소식 작성"""
-        try:
-            # 🔧 안전한 image_urls 접근
+        # 안전한 image_urls 접근
+        if image_urls is None:
             image_urls = getattr(post_data, 'image_urls', [])
             if image_urls is None:
                 image_urls = []
-            
-            db_post = Post(
-                issue_id=issue_id,
-                author_id=author_id,
-                content=post_data.content,
-                image_urls=image_urls
-            )
-            
-            db.add(db_post)
-            await db.commit()
-            await db.refresh(db_post)
-            return db_post
-            
-        except Exception as e:
-            await db.rollback()
-            print(f"소식 작성 오류: {str(e)}")
-            raise e
+        
+        # 안전한 image_blob_keys 접근
+        if image_blob_keys is None:
+            image_blob_keys = []
+        
+        db_post = Post(
+            issue_id=issue_id,
+            author_id=author_id,
+            content=post_data.content,
+            image_urls=image_urls,
+            image_blob_keys=image_blob_keys
+        )
+        
+        db.add(db_post)
+        # Transaction management moved to upper layer
+        return db_post
 
     async def get_posts_by_issue(
         self,
@@ -62,8 +63,8 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
             return result.scalars().unique().all()
             
         except Exception as e:
-            print(f"소식 목록 조회 오류: {str(e)}")
-            return []
+            # Exception propagated to upper layer
+            raise e
 
     async def count_posts_by_issue(
         self,
@@ -79,8 +80,8 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
             return result.scalar() or 0
             
         except Exception as e:
-            print(f"소식 개수 조회 오류: {str(e)}")
-            return 0
+            # Exception propagated to upper layer
+            raise e
 
     async def get_posts_by_group(
         self,

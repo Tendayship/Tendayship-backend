@@ -12,16 +12,16 @@ from ...crud.book_crud import book_crud
 from ...crud.post_crud import post_crud
 from ...services.pdf_service import pdf_service
 from ...schemas.book import BookResponse, BookStatusUpdate
+from ...core.constants import ADMIN_EMAILS
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 # 관리자 권한 확인 의존성
 async def verify_admin_user(current_user: User = Depends(get_current_user)):
     """관리자 권한 확인 (실제로는 환경변수나 DB에서 관리자 목록 확인)"""
-    # TODO: 실제 관리자 권한 확인 로직 구현
-    admin_emails = ["admin@familynews.com"]  # 환경변수로 관리
+    # TODO: Move to environment variables in production
     
-    if current_user.email not in admin_emails:
+    if current_user.email not in ADMIN_EMAILS:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="관리자 권한이 필요합니다"
@@ -35,31 +35,10 @@ async def get_all_family_groups(
     admin_user: User = Depends(verify_admin_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """모든 가족 그룹 목록 조회 (관리자용)"""
+    """모든 가족 그룹 목록 조회 (관리자용) - N+1 최적화"""
     
-    groups = await family_group_crud.get_multi(db, skip=skip, limit=limit)
-    
-    # 각 그룹의 추가 정보 포함
-    result = []
-    for group in groups:
-        # 현재 활성 회차 조회
-        current_issue = await issue_crud.get_current_issue(db, group.id)
-        
-        # 미완료 책자 확인
-        pending_books = await book_crud.get_pending_books_by_group(db, group.id)
-        
-        result.append({
-            "id": group.id,
-            "group_name": group.group_name,
-            "leader_name": group.leader.name,
-            "member_count": len(group.members),
-            "recipient_name": group.recipient.name if group.recipient else None,
-            "current_issue_id": current_issue.id if current_issue else None,
-            "current_issue_posts": await post_crud.count_posts_by_issue(db, current_issue.id) if current_issue else 0,
-            "pending_books_count": len(pending_books),
-            "created_at": group.created_at,
-            "status": group.status
-        })
+    # 최적화된 메서드 사용 (N+1 쿼리 해결)
+    result = await family_group_crud.get_all_groups_with_stats(db, skip=skip, limit=limit)
     
     return result
 

@@ -40,8 +40,7 @@ class UserCRUD(BaseCRUD[User, UserCreate, UserUpdate]):
         for field, value in update_data.items():
             setattr(user, field, value)
         
-        await db.commit()
-        await db.refresh(user)
+        # Transaction management moved to upper layer
         return user
     
     async def deactivate_user(self, db: AsyncSession, user_id: UUID) -> bool:
@@ -52,7 +51,7 @@ class UserCRUD(BaseCRUD[User, UserCreate, UserUpdate]):
         
         user.is_active = False
         user.is_deleted = True
-        await db.commit()
+        # Transaction management moved to upper layer
         return True
 
 

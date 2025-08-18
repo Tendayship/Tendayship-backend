@@ -89,7 +89,7 @@ class FamilyNewsStorageService:
         post_id: str,
         file: UploadFile,
         image_index: int = 0
-    ) -> str:
+    ) -> tuple[str, str]:
         """소식 이미지 업로드"""
         self._ensure_initialized()
 
@@ -125,7 +125,8 @@ class FamilyNewsStorageService:
 
             blob_url = blob_client.url
             print(f"DEBUG: Successfully uploaded: {blob_url}")
-            return blob_url
+            # Return both URL and blob key for deletion purposes
+            return blob_url, blob_name
 
         except Exception as e:
             error_msg = f"이미지 업로드 실패: {str(e)}"
@@ -194,8 +195,32 @@ class FamilyNewsStorageService:
             logger.error(error_msg)
             raise HTTPException(status_code=500, detail=error_msg)
 
+    def delete_post_images_by_keys(self, blob_keys: list[str]):
+        """저장된 블롭 키로 이미지 삭제 (DB 에서 가져온 정확한 키 사용)"""
+        self._ensure_initialized()
+
+        deleted_count = 0
+        errors = []
+        
+        for blob_key in blob_keys:
+            try:
+                blob_client = self.container_client.get_blob_client(blob_key)
+                blob_client.delete_blob()
+                deleted_count += 1
+                print(f"DEBUG: Deleted blob: {blob_key}")
+            except Exception as e:
+                error_msg = f"Failed to delete blob {blob_key}: {str(e)}"
+                logger.warning(error_msg)
+                errors.append(error_msg)
+
+        print(f"DEBUG: Deleted {deleted_count}/{len(blob_keys)} images")
+        if errors:
+            logger.warning(f"Deletion errors: {errors}")
+        
+        return deleted_count, errors
+    
     def delete_post_images(self, group_id: str, issue_id: str, post_id: str):
-        """소식의 모든 이미지 삭제"""
+        """소식의 모든 이미지 삭제 (레거시 메서드 - 경로 재구성 사용)"""
         self._ensure_initialized()
 
         try:

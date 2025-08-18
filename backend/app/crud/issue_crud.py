@@ -9,24 +9,18 @@ class IssueCRUD:
 
     async def create(self, db: AsyncSession, obj_in: dict) -> Issue:
         """새 회차 생성"""
-        try:
-            db_obj = Issue(
-                group_id=obj_in["group_id"],
-                issue_number=obj_in["issue_number"],
-                deadline_date=datetime.strptime(obj_in["deadline_date"], "%Y-%m-%d").date() if isinstance(obj_in["deadline_date"], str) else obj_in["deadline_date"],
-                status=IssueStatus.OPEN,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
-            )
-            
-            db.add(db_obj)
-            await db.commit()
-            await db.refresh(db_obj)
-            return db_obj
-            
-        except Exception as e:
-            await db.rollback()
-            raise e
+        db_obj = Issue(
+            group_id=obj_in["group_id"],
+            issue_number=obj_in["issue_number"],
+            deadline_date=datetime.strptime(obj_in["deadline_date"], "%Y-%m-%d").date() if isinstance(obj_in["deadline_date"], str) else obj_in["deadline_date"],
+            status=IssueStatus.OPEN,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        
+        db.add(db_obj)
+        # Transaction management moved to upper layer
+        return db_obj
 
     async def get(self, db: AsyncSession, id: str) -> Optional[Issue]:
         """ID로 회차 조회"""
@@ -56,7 +50,7 @@ class IssueCRUD:
             return result.scalars().first()
             
         except Exception as e:
-            print(f"현재 회차 조회 오류: {str(e)}")
+            # Exception propagated to upper layer
             return None
 
     async def get_issues_by_group(self, db: AsyncSession, group_id: str, skip: int = 0, limit: int = 100) -> List[Issue]:
@@ -76,62 +70,41 @@ class IssueCRUD:
 
     async def update(self, db: AsyncSession, db_obj: Issue, obj_in: dict) -> Issue:
         """회차 정보 업데이트"""
-        try:
-            update_data = obj_in if isinstance(obj_in, dict) else obj_in.dict(exclude_unset=True)
-            for field, value in update_data.items():
-                if hasattr(db_obj, field):
-                    setattr(db_obj, field, value)
-            db_obj.updated_at = datetime.utcnow()
-            await db.commit()
-            await db.refresh(db_obj)
-            return db_obj
-            
-        except Exception as e:
-            await db.rollback()
-            raise e
+        update_data = obj_in if isinstance(obj_in, dict) else obj_in.dict(exclude_unset=True)
+        for field, value in update_data.items():
+            if hasattr(db_obj, field):
+                setattr(db_obj, field, value)
+        db_obj.updated_at = datetime.utcnow()
+        # Transaction management moved to upper layer
+        return db_obj
 
     async def close_issue(self, db: AsyncSession, issue_id: str) -> Issue:
         """회차 마감"""
-        try:
-            issue = await self.get(db, issue_id)
-            if not issue:
-                raise ValueError(f"Issue with id {issue_id} not found")
-            issue.status = IssueStatus.CLOSED
-            issue.updated_at = datetime.utcnow()
-            await db.commit()
-            await db.refresh(issue)
-            return issue
-            
-        except Exception as e:
-            await db.rollback()
-            raise e
+        issue = await self.get(db, issue_id)
+        if not issue:
+            raise ValueError(f"Issue with id {issue_id} not found")
+        issue.status = IssueStatus.CLOSED
+        issue.updated_at = datetime.utcnow()
+        # Transaction management moved to upper layer
+        return issue
 
     async def delete(self, db: AsyncSession, id: str) -> bool:
         """회차 삭제"""
-        try:
-            issue = await self.get(db, id)
-            if not issue:
-                return False
-            await db.delete(issue)
-            await db.commit()
-            return True
-            
-        except Exception as e:
-            await db.rollback()
-            raise e
+        issue = await self.get(db, id)
+        if not issue:
+            return False
+        await db.delete(issue)
+        # Transaction management moved to upper layer
+        return True
 
     async def count_posts_by_issue(self, db: AsyncSession, issue_id: str) -> int:
         """회차별 소식 개수 조회"""
-        try:
-            from ..models.post import Post
-            result = await db.execute(
-                select(Post).where(Post.issue_id == issue_id)
-            )
-            posts = result.scalars().all()
-            return len(posts)
-            
-        except Exception as e:
-            return 0
+        from ..models.post import Post
+        from sqlalchemy import func
+        result = await db.execute(
+            select(func.count(Post.id)).where(Post.issue_id == issue_id)
+        )
+        return result.scalar() or 0
 
 # 싱글톤 인스턴스 생성
 issue_crud = IssueCRUD()

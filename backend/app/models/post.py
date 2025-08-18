@@ -24,6 +24,10 @@ class Post(Base, UUIDMixin, TimestampMixin):
     # 예: ["image1.jpg", "image2.jpg", "image3.jpg", "image4.jpg"]
     image_urls = Column(JSONB, nullable=True, default=list, comment="이미지 URL 배열")
     
+    # 이미지 블롭 키 저장 (정확한 삭제를 위해)
+    # 예: ["group/issue/post/image1.jpg", "group/issue/post/image2.jpg"]
+    image_blob_keys = Column(JSONB, nullable=True, default=list, comment="Azure Blob Storage 키 배열")
+    
     # 관계
     issue = relationship("Issue", back_populates="posts")
     author = relationship("User", back_populates="posts")
