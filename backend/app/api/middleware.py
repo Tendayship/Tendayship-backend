@@ -42,12 +42,18 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Azure 배포용 추가 보안 헤더
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://kind-sky-0070e521e.2.azurestaticapps.net; "
-            "style-src 'self' 'unsafe-inline' https://kind-sky-0070e521e.2.azurestaticapps.net; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
+            "https://kind-sky-0070e521e.2.azurestaticapps.net "
+            "https://cdn.jsdelivr.net; "  
+            "style-src 'self' 'unsafe-inline' "
+            "https://kind-sky-0070e521e.2.azurestaticapps.net "
+            "https://cdn.jsdelivr.net; "  
             "img-src 'self' data: https: blob:; "
             "connect-src 'self' https://tendayapp-f0a0drg2b6avh8g3.koreacentral-01.azurewebsites.net"
         )
         
         return response
+
