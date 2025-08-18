@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
@@ -10,7 +10,6 @@ from ...core.security import create_access_token
 from ...api.dependencies import get_current_user
 from ...models.user import User
 from ...crud.user_crud import user_crud
-import secrets
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,20 +20,31 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 @router.get("/kakao/callback")
 async def kakao_oauth_callback(
     code: Optional[str] = None,
+    token: Optional[str] = None,  # ✅ 추가
+    user_id: Optional[str] = None,  # ✅ 추가
     state: Optional[str] = None,
     error: Optional[str] = None,
     error_description: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    카카오 OAuth 콜백 처리
+    """카카오 OAuth 콜백 처리 - 통합 처리"""
     
-    1. 인가 코드로 액세스 토큰 받기
-    2. 액세스 토큰으로 사용자 정보 받기
-    3. 카카오 계정 검증 (실제 카카오 계정인지 확인)
-    4. 사용자 생성 또는 기존 사용자 반환
-    5. JWT 토큰 발급 및 리다이렉트
-    """
+    # ✅ 토큰이 있으면 JSON 응답 반환
+    if token and user_id:
+        logger.info(f"Token callback received: user_id={user_id}")
+        return JSONResponse(content={
+            "success": True,
+            "message": "로그인 성공",
+            "token": token,
+            "user_id": user_id,
+            "next_steps": [
+                "1. 포스트맨에서 Authorization: Bearer {token} 헤더 사용",
+                "2. /api/auth/verify 엔드포인트로 토큰 검증",
+                "3. /api/family/setup 엔드포인트로 가족 그룹 생성"
+            ]
+        })
+    
+    # 기존 OAuth 처리 로직 그대로 유지...
     if error:
         error_msg = error_description or error
         logger.error(f"OAuth error received: {error} - {error_description}")
@@ -52,49 +62,31 @@ async def kakao_oauth_callback(
     
     try:
         logger.info(f"Starting OAuth callback with code: {code[:20]}...")
-        
-        # 1. 액세스 토큰 받기
-        logger.info("Step 1 - Getting access token...")
+        # ... 기존 OAuth 처리 로직 그대로 ...
         access_token = await kakao_oauth_service.get_access_token(code)
-        logger.info(f"Got access token: {access_token[:20] if access_token else 'None'}...")
-        
-        # 2. 사용자 정보 받기
-        logger.info("Step 2 - Getting user info...")
         kakao_user_info = await kakao_oauth_service.get_user_info(access_token)
-        logger.info(f"Got user info: {kakao_user_info.get('id') if kakao_user_info else 'None'}")
         
-        # 3. 카카오 계정 검증 (실제 카카오 계정인지 확인)
-        logger.info("Step 3 - Verifying account...")
         if not await kakao_oauth_service.verify_kakao_account(kakao_user_info):
             logger.warning("Account verification failed")
             return RedirectResponse(
                 url=f"{kakao_oauth_service.frontend_url}/login?error=invalid_kakao_account",
                 status_code=302
             )
-        logger.info("Account verification passed")
-        
-        # 4. 로그인 또는 회원가입
-        logger.info("Step 4 - Login or create user...")
+
         user = await kakao_oauth_service.login_or_create_user(kakao_user_info, db)
-        logger.info(f"User: {user.id if user else 'None'}")
-        
-        # 5. JWT 토큰 생성
-        logger.info("Step 5 - Creating JWT token...")
         jwt_token = create_access_token(data={"sub": str(user.id)})
-        logger.info(f"JWT token created: {jwt_token[:20] if jwt_token else 'None'}...")
-        
-        # 6. 프론트엔드로 리다이렉트 (토큰 포함)
-        redirect_url = f"{kakao_oauth_service.frontend_url}/auth/callback?token={jwt_token}&user_id={user.id}"
+
+        # ✅ 같은 엔드포인트로 리다이렉트 (이제 token 파라미터 처리됨)
+        redirect_url = f"{kakao_oauth_service.frontend_url}/api/auth/kakao/callback?token={jwt_token}&user_id={user.id}"
         logger.info(f"Redirecting to: {redirect_url}")
         return RedirectResponse(url=redirect_url, status_code=302)
-        
+
     except Exception as e:
         logger.error(f"OAuth callback failed: {str(e)}", exc_info=True)
         return RedirectResponse(
             url=f"{kakao_oauth_service.frontend_url}/login?error=auth_failed",
             status_code=302
         )
-
 
 @router.post("/kakao", response_model=KakaoLoginResponse)
 async def kakao_login(
