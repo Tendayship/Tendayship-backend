@@ -1,478 +1,246 @@
 import os
-import io
-import mimetypes
-from typing import Optional, List, Tuple
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import datetime, timedelta
+from typing import Optional
+from azure.storage.blob import BlobServiceClient, ContentSettings, generate_blob_sas, BlobSasPermissions
+from azure.core.exceptions import ResourceNotFoundError
+from fastapi import HTTPException, UploadFile
 import logging
-
-from azure.storage.blob import (
-    BlobServiceClient,
-    BlobClient,
-    ContainerClient,
-    generate_blob_sas,
-    BlobSasPermissions,
-    ContentSettings
-)
-from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
-from PIL import Image, ImageOps
-
-from ..core.config import settings
 
 logger = logging.getLogger(__name__)
 
+class FamilyNewsStorageService:
+    def __init__(self):
+        # 초기화는 실제 사용 시점에서만 수행
+        self._initialized = False
+        self.blob_service_client = None
+        self.container_client = None
+        self.container_name = None
 
-class AzureStorageService:
-    """
-    Azure Blob Storage 서비스 클래스
-    싱글톤 패턴으로 구현하여 연결을 재사용합니다.
-    """
-    
-    _instance = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialize()
-        return cls._instance
-    
-    def _initialize(self):
-        """서비스 초기화"""
+    def _ensure_initialized(self):
+        """실제 사용 시점에서만 Azure Storage 연결"""
+        if self._initialized:
+            return
+
         try:
-            self.blob_service_client = BlobServiceClient.from_connection_string(
-                settings.AZURE_STORAGE_CONNECTION_STRING
-            )
-            self.container_name = settings.AZURE_STORAGE_CONTAINER_NAME
-            self._ensure_container_exists()
-            logger.info(f"Azure Storage Service initialized for container: {self.container_name}")
+            # 환경 변수 로드 확인
+            print("DEBUG: Azure Storage 초기화 시작...")
+            
+            connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+            print(f"DEBUG: Connection string exists: {bool(connection_string)}")
+
+            if not connection_string:
+                # 개별 구성 요소로 연결 문자열 구성
+                account_name = os.getenv("AZURE_STORAGE_ACCOUNT_NAME")
+                account_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")
+                
+                print(f"DEBUG: Account name: {account_name}")
+                print(f"DEBUG: Account key exists: {bool(account_key)}")
+
+                if account_name and account_key:
+                    connection_string = (
+                        f"DefaultEndpointsProtocol=https;"
+                        f"AccountName={account_name};"
+                        f"AccountKey={account_key};"
+                        f"EndpointSuffix=core.windows.net"
+                    )
+                    print("DEBUG: Connection string created from components")
+                else:
+                    raise ValueError(
+                        "Azure Storage 연결 정보를 찾을 수 없습니다. "
+                        "다음 환경변수 중 하나를 설정하세요:\n"
+                        "1. AZURE_STORAGE_CONNECTION_STRING\n"
+                        "2. AZURE_STORAGE_ACCOUNT_NAME + AZURE_STORAGE_ACCOUNT_KEY\n"
+                        f"현재 상태:\n"
+                        f"- AZURE_STORAGE_CONNECTION_STRING: {bool(os.getenv('AZURE_STORAGE_CONNECTION_STRING'))}\n"
+                        f"- AZURE_STORAGE_ACCOUNT_NAME: {bool(account_name)}\n"
+                        f"- AZURE_STORAGE_ACCOUNT_KEY: {bool(account_key)}"
+                    )
+
+            self.container_name = os.getenv("AZURE_STORAGE_CONTAINER_NAME", "family-news")
+            print(f"DEBUG: Container name: {self.container_name}")
+
+            # Azure Storage 클라이언트 초기화
+            print("DEBUG: BlobServiceClient 초기화 중...")
+            self.blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+            self.container_client = self.blob_service_client.get_container_client(self.container_name)
+
+            # 컨테이너 존재 확인 및 생성
+            try:
+                properties = self.container_client.get_container_properties()
+                print(f"DEBUG: Container '{self.container_name}' exists")
+            except ResourceNotFoundError:
+                print(f"DEBUG: Container '{self.container_name}' not found, creating...")
+                self.container_client.create_container()
+                print(f"DEBUG: Container '{self.container_name}' created")
+
+            self._initialized = True
+            print("DEBUG: Azure Storage 초기화 완료")
+
         except Exception as e:
-            logger.error(f"Failed to initialize Azure Storage Service: {e}")
-            raise
-    
-    def _ensure_container_exists(self):
-        """컨테이너가 없으면 생성합니다"""
-        try:
-            container_client = self.blob_service_client.get_container_client(self.container_name)
-            container_client.get_container_properties()
-        except ResourceNotFoundError:
-            # 컨테이너가 없으면 생성
-            container_client = self.blob_service_client.create_container(
-                self.container_name,
-                public_access=None  # 비공개 컨테이너
-            )
-            logger.info(f"Created container: {self.container_name}")
-    
-    def _build_blob_path(self, group_id: str, category: str, *parts: str) -> str:
-        """
-        Blob 경로를 생성합니다.
-        예: group_id/category/subfolder/filename.ext
-        """
-        path_parts = [group_id, category] + list(parts)
-        return "/".join(path_parts)
-    
-    def _get_safe_filename(self, filename: str) -> str:
-        """
-        파일명을 안전하게 변환합니다.
-        특수문자 제거, 공백을 언더스코어로 변경
-        """
-        # 파일명과 확장자 분리
-        name, ext = os.path.splitext(filename)
-        # 안전한 문자만 남기기
-        safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
-        # 타임스탬프 추가로 유니크성 보장
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return f"{safe_name}_{timestamp}{ext}"
-    
-    async def upload_profile_image(
-        self,
-        group_id: str,
-        user_id: str,
-        image_data: bytes,
-        filename: str = "profile.jpg"
-    ) -> str:
-        """
-        프로필 이미지를 업로드합니다.
-        이미지는 자동으로 리사이즈되고 최적화됩니다.
-        
-        Args:
-            group_id: 그룹 ID
-            user_id: 사용자 ID  
-            image_data: 이미지 바이너리 데이터
-            filename: 파일명
-            
-        Returns:
-            업로드된 이미지의 URL
-        """
-        try:
-            # 이미지 처리 (리사이즈, 최적화)
-            processed_image = self._process_profile_image(image_data)
-            
-            # Blob 경로 생성
-            safe_filename = self._get_safe_filename(filename)
-            blob_path = self._build_blob_path(group_id, "profiles", user_id, safe_filename)
-            
-            # 업로드
-            blob_client = self.blob_service_client.get_blob_client(
-                container=self.container_name,
-                blob=blob_path
-            )
-            
-            blob_client.upload_blob(
-                processed_image,
-                overwrite=True,
-                content_settings=ContentSettings(
-                    content_type="image/jpeg",
-                    cache_control="max-age=604800"  # 7일 캐시
-                )
-            )
-            
-            # SAS URL 생성 (1년 유효)
-            sas_url = self.generate_sas_url(blob_path, expiry_hours=8760)
-            logger.info(f"Profile image uploaded: {blob_path}")
-            return sas_url
-            
-        except Exception as e:
-            logger.error(f"Failed to upload profile image: {e}")
-            raise
-    
-    def _process_profile_image(self, image_data: bytes) -> bytes:
-        """
-        프로필 이미지를 처리합니다.
-        - EXIF 회전 적용
-        - 정사각형으로 크롭
-        - 500x500으로 리사이즈
-        - JPEG로 최적화
-        """
-        # 이미지 열기
-        img = Image.open(io.BytesIO(image_data))
-        
-        # EXIF 회전 적용
-        img = ImageOps.exif_transpose(img)
-        
-        # 정사각형으로 크롭 (중앙 기준)
-        width, height = img.size
-        size = min(width, height)
-        left = (width - size) // 2
-        top = (height - size) // 2
-        right = left + size
-        bottom = top + size
-        img = img.crop((left, top, right, bottom))
-        
-        # 500x500으로 리사이즈
-        img = img.resize((500, 500), Image.Resampling.LANCZOS)
-        
-        # RGB로 변환 (JPEG는 RGBA 지원 안함)
-        if img.mode in ('RGBA', 'LA', 'P'):
-            background = Image.new('RGB', img.size, (255, 255, 255))
-            if img.mode == 'P':
-                img = img.convert('RGBA')
-            background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
-            img = background
-        elif img.mode != 'RGB':
-            img = img.convert('RGB')
-        
-        # 바이트로 변환
-        output = io.BytesIO()
-        img.save(output, format='JPEG', quality=85, optimize=True)
-        return output.getvalue()
-    
-    async def upload_post_images(
+            error_msg = f"Azure Storage 초기화 실패: {str(e)}"
+            logger.error(error_msg)
+            print(f"DEBUG ERROR: {error_msg}")
+            raise ValueError(error_msg)
+
+    def upload_post_image(
         self,
         group_id: str,
         issue_id: str,
         post_id: str,
-        images: List[Tuple[str, bytes]]
-    ) -> List[str]:
-        """
-        게시글 이미지들을 업로드합니다.
-        최대 4장까지 업로드 가능합니다.
-        
-        Args:
-            group_id: 그룹 ID
-            issue_id: 회차 ID
-            post_id: 게시글 ID
-            images: [(filename, data), ...] 형태의 이미지 리스트
-            
-        Returns:
-            업로드된 이미지 URL 리스트
-        """
-        if len(images) > settings.MAX_IMAGES_PER_POST:
-            raise ValueError(f"최대 {settings.MAX_IMAGES_PER_POST}장까지 업로드 가능합니다")
-        
-        uploaded_urls = []
-        
-        for idx, (filename, image_data) in enumerate(images, 1):
-            try:
-                # 이미지 처리 (리사이즈, 최적화)
-                processed_image = self._process_post_image(image_data)
-                
-                # 파일명 생성 (image1.jpg, image2.jpg, ...)
-                ext = Path(filename).suffix or '.jpg'
-                new_filename = f"image{idx}{ext}"
-                
-                # Blob 경로 생성
-                blob_path = self._build_blob_path(
-                    group_id, "issues", issue_id, "posts", post_id, new_filename
-                )
-                
-                # 업로드
-                blob_client = self.blob_service_client.get_blob_client(
-                    container=self.container_name,
-                    blob=blob_path
-                )
-                
-                blob_client.upload_blob(
-                    processed_image,
-                    overwrite=True,
-                    content_settings=ContentSettings(
-                        content_type=mimetypes.guess_type(filename)[0] or "image/jpeg",
-                        cache_control="max-age=2592000"  # 30일 캐시
-                    )
-                )
-                
-                # SAS URL 생성
-                sas_url = self.generate_sas_url(blob_path, expiry_hours=8760)  # 1년
-                uploaded_urls.append(sas_url)
-                
-            except Exception as e:
-                logger.error(f"Failed to upload image {idx}: {e}")
-                # 실패한 이미지들 롤백
-                for url in uploaded_urls:
-                    try:
-                        await self.delete_from_url(url)
-                    except:
-                        pass
-                raise
-        
-        logger.info(f"Uploaded {len(uploaded_urls)} images for post {post_id}")
-        return uploaded_urls
-    
-    def _process_post_image(self, image_data: bytes) -> bytes:
-        """
-        게시글 이미지를 처리합니다.
-        - EXIF 회전 적용
-        - 최대 1920px로 리사이즈 (비율 유지)
-        - JPEG로 최적화
-        """
-        img = Image.open(io.BytesIO(image_data))
-        
-        # EXIF 회전 적용
-        img = ImageOps.exif_transpose(img)
-        
-        # 최대 크기로 리사이즈 (비율 유지)
-        max_size = 1920
-        if img.width > max_size or img.height > max_size:
-            img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-        
-        # RGB로 변환
-        if img.mode in ('RGBA', 'LA', 'P'):
-            background = Image.new('RGB', img.size, (255, 255, 255))
-            if img.mode == 'P':
-                img = img.convert('RGBA')
-            background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
-            img = background
-        elif img.mode != 'RGB':
-            img = img.convert('RGB')
-        
-        # 바이트로 변환
-        output = io.BytesIO()
-        img.save(output, format='JPEG', quality=90, optimize=True)
-        return output.getvalue()
-    
-    async def upload_book_pdf(
+        file: UploadFile,
+        image_index: int = 0
+    ) -> str:
+        """소식 이미지 업로드"""
+        self._ensure_initialized()
+
+        try:
+            # 파일 내용 읽기
+            content = file.file.read()
+            file.file.seek(0)  # 파일 포인터 리셋
+
+            if len(content) == 0:
+                raise ValueError(f"파일 '{file.filename}'의 내용이 비어있습니다")
+
+            # 파일 확장자 추출
+            file_extension = 'jpg'
+            if file.filename and '.' in file.filename:
+                file_extension = file.filename.split('.')[-1].lower()
+                if file_extension not in ['jpg', 'jpeg', 'png', 'webp']:
+                    file_extension = 'jpg'
+
+            # Blob 경로 생성
+            blob_name = f"{group_id}/issues/{issue_id}/posts/{post_id}/image_{image_index + 1}.{file_extension}"
+            print(f"DEBUG: Uploading to blob path: {blob_name}")
+
+            # Content-Type 설정
+            content_settings = ContentSettings(content_type=file.content_type or "image/jpeg")
+
+            # Blob 업로드
+            blob_client = self.container_client.get_blob_client(blob_name)
+            blob_client.upload_blob(
+                content,
+                overwrite=True,
+                content_settings=content_settings
+            )
+
+            blob_url = blob_client.url
+            print(f"DEBUG: Successfully uploaded: {blob_url}")
+            return blob_url
+
+        except Exception as e:
+            error_msg = f"이미지 업로드 실패: {str(e)}"
+            logger.error(error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+
+    def upload_profile_image(self, user_id: str, file: UploadFile) -> str:
+        """프로필 이미지 업로드"""
+        self._ensure_initialized()
+
+        try:
+            content = file.file.read()
+            file.file.seek(0)
+
+            if len(content) == 0:
+                raise ValueError("파일 내용이 비어있습니다")
+
+            file_extension = 'jpg'
+            if file.filename and '.' in file.filename:
+                file_extension = file.filename.split('.')[-1].lower()
+                if file_extension not in ['jpg', 'jpeg', 'png', 'webp']:
+                    file_extension = 'jpg'
+
+            blob_name = f"profiles/{user_id}/avatar.{file_extension}"
+            content_settings = ContentSettings(content_type=file.content_type or "image/jpeg")
+
+            blob_client = self.container_client.get_blob_client(blob_name)
+            blob_client.upload_blob(
+                content,
+                overwrite=True,
+                content_settings=content_settings
+            )
+
+            return blob_client.url
+
+        except Exception as e:
+            error_msg = f"프로필 이미지 업로드 실패: {str(e)}"
+            logger.error(error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+
+    def upload_book_pdf(
         self,
         group_id: str,
         issue_id: str,
-        pdf_data: bytes,
-        filename: Optional[str] = None
+        pdf_content: bytes,
+        filename: str
     ) -> str:
-        """
-        책자 PDF를 업로드합니다.
-        Args:
-            group_id: 그룹 ID
-            issue_id: 회차 ID
-            pdf_data: PDF 바이너리 데이터
-            filename: 파일명 (없으면 자동 생성)
-        Returns:
-            업로드된 PDF의 URL
-        """
+        """책자 PDF 업로드"""
+        self._ensure_initialized()
+
         try:
-            # 파일명 생성
-            if not filename:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"book_{issue_id}_{timestamp}.pdf"
+            blob_name = f"{group_id}/issues/{issue_id}/books/{filename}"
+            content_settings = ContentSettings(content_type="application/pdf")
 
-            # Blob 경로 생성 (수정된 부분)
-            blob_path = self._build_blob_path(
-                group_id, "issues", issue_id, "books", filename
-            )
-
-            # 업로드
-            blob_client = self.blob_service_client.get_blob_client(
-                container=self.container_name,
-                blob=blob_path
-            )
+            blob_client = self.container_client.get_blob_client(blob_name)
             blob_client.upload_blob(
-                pdf_data,
+                pdf_content,
                 overwrite=True,
-                content_settings=ContentSettings(
-                    content_type="application/pdf",
-                    content_disposition=f'inline; filename="{filename}"'
-                )
+                content_settings=content_settings
             )
 
-            # SAS URL 생성 (다운로드용, 30일 유효)
-            sas_url = self.generate_sas_url(blob_path, expiry_hours=720, download=True)
-            logger.info(f"Book PDF uploaded: {blob_path}")
-            return sas_url
+            return blob_client.url
+
         except Exception as e:
-            logger.error(f"Failed to upload book PDF: {e}")
-            raise
-    
-    def generate_sas_url(
-        self,
-        blob_path: str,
-        expiry_hours: int = 24,
-        download: bool = False
-    ) -> str:
-        """
-        Blob에 대한 SAS URL을 생성합니다.
-        
-        Args:
-            blob_path: Blob 경로
-            expiry_hours: 유효 시간 (시간 단위)
-            download: 다운로드 권한 포함 여부
-            
-        Returns:
-            SAS URL
-        """
-        permissions = BlobSasPermissions(read=True)
-        if download:
-            permissions.add = True
-            permissions.create = True
-            permissions.write = True
-        
-        sas_token = generate_blob_sas(
-            account_name=settings.AZURE_STORAGE_ACCOUNT_NAME,
-            container_name=self.container_name,
-            blob_name=blob_path,
-            account_key=settings.AZURE_STORAGE_ACCOUNT_KEY,
-            permission=permissions,
-            expiry=datetime.now(timezone.utc) + timedelta(hours=expiry_hours)
-        )
-        
-        return f"https://{settings.AZURE_STORAGE_ACCOUNT_NAME}.blob.core.windows.net/{self.container_name}/{blob_path}?{sas_token}"
-    
-    async def delete_blob(self, blob_path: str):
-        """
-        Blob을 삭제합니다.
-        
-        Args:
-            blob_path: 삭제할 Blob 경로
-        """
+            error_msg = f"PDF 업로드 실패: {str(e)}"
+            logger.error(error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+
+    def delete_post_images(self, group_id: str, issue_id: str, post_id: str):
+        """소식의 모든 이미지 삭제"""
+        self._ensure_initialized()
+
         try:
-            blob_client = self.blob_service_client.get_blob_client(
-                container=self.container_name,
-                blob=blob_path
+            prefix = f"{group_id}/issues/{issue_id}/posts/{post_id}/"
+            blobs = self.container_client.list_blobs(name_starts_with=prefix)
+
+            deleted_count = 0
+            for blob in blobs:
+                blob_client = self.container_client.get_blob_client(blob.name)
+                blob_client.delete_blob()
+                deleted_count += 1
+
+            print(f"DEBUG: Deleted {deleted_count} images for post {post_id}")
+
+        except Exception as e:
+            error_msg = f"이미지 삭제 실패: {str(e)}"
+            logger.error(error_msg)
+
+    def generate_sas_url(self, blob_name: str, expiry_minutes: int = 60) -> str:
+        """SAS URL 생성"""
+        self._ensure_initialized()
+
+        try:
+            sas_token = generate_blob_sas(
+                account_name=self.blob_service_client.account_name,
+                container_name=self.container_name,
+                blob_name=blob_name,
+                account_key=self.blob_service_client.credential.account_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.utcnow() + timedelta(minutes=expiry_minutes)
             )
-            blob_client.delete_blob()
-            logger.info(f"Blob deleted: {blob_path}")
-        except ResourceNotFoundError:
-            logger.warning(f"Blob not found for deletion: {blob_path}")
+
+            return f"https://{self.blob_service_client.account_name}.blob.core.windows.net/{self.container_name}/{blob_name}?{sas_token}"
+
         except Exception as e:
-            logger.error(f"Failed to delete blob: {e}")
-            raise
-    
-    async def delete_from_url(self, url: str):
-        """
-        URL에서 Blob 경로를 추출하여 삭제합니다.
-        
-        Args:
-            url: Blob URL
-        """
-        try:
-            # URL에서 Blob 경로 추출
-            # 예: https://account.blob.core.windows.net/container/path/to/file.jpg?sas
-            parts = url.split(f"{self.container_name}/", 1)
-            if len(parts) > 1:
-                blob_path = parts[1].split("?")[0]  # SAS 토큰 제거
-                await self.delete_blob(blob_path)
-        except Exception as e:
-            logger.error(f"Failed to delete from URL: {e}")
-    
-    async def list_blobs(self, prefix: str) -> List[str]:
-        """
-        특정 프리픽스로 시작하는 모든 Blob을 나열합니다.
-        
-        Args:
-            prefix: 검색할 프리픽스
-            
-        Returns:
-            Blob 이름 리스트
-        """
-        try:
-            container_client = self.blob_service_client.get_container_client(self.container_name)
-            blobs = container_client.list_blobs(name_starts_with=prefix)
-            return [blob.name for blob in blobs]
-        except Exception as e:
-            logger.error(f"Failed to list blobs: {e}")
-            return []
-    
-    async def download_blob(self, blob_path: str) -> bytes:
-        """
-        Blob을 다운로드합니다.
-        
-        Args:
-            blob_path: 다운로드할 Blob 경로
-            
-        Returns:
-            파일 데이터
-        """
-        try:
-            blob_client = self.blob_service_client.get_blob_client(
-                container=self.container_name,
-                blob=blob_path
-            )
-            return blob_client.download_blob().readall()
-        except Exception as e:
-            logger.error(f"Failed to download blob: {e}")
-            raise
-    
-    def get_blob_url(self, blob_path: str) -> str:
-        """
-        Blob의 기본 URL을 반환합니다 (SAS 없음).
-        CDN 사용 시 이 URL을 사용합니다.
-        
-        Args:
-            blob_path: Blob 경로
-            
-        Returns:
-            Blob URL
-        """
-        return f"https://{settings.AZURE_STORAGE_ACCOUNT_NAME}.blob.core.windows.net/{self.container_name}/{blob_path}"
+            error_msg = f"SAS URL 생성 실패: {str(e)}"
+            logger.error(error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
 
+# 전역 인스턴스 (단순한 방식)
+_storage_instance: Optional[FamilyNewsStorageService] = None
 
-# 싱글톤 인스턴스 생성
-storage_service = AzureStorageService()
-
-
-# 편의 함수들 (직접 임포트해서 사용 가능)
-async def upload_profile_image(group_id: str, user_id: str, image_data: bytes, filename: str = "profile.jpg") -> str:
-    """프로필 이미지 업로드"""
-    return await storage_service.upload_profile_image(group_id, user_id, image_data, filename)
-
-async def upload_post_images(group_id: str, issue_id: str, post_id: str, images: List[Tuple[str, bytes]]) -> List[str]:
-    """게시글 이미지 업로드"""
-    return await storage_service.upload_post_images(group_id, issue_id, post_id, images)
-
-async def upload_book_pdf(group_id: str, issue_id: str, pdf_data: bytes, filename: Optional[str] = None) -> str:
-    """책자 PDF 업로드"""
-    return await storage_service.upload_book_pdf(group_id, issue_id, pdf_data, filename)
-
-async def delete_blob(blob_path: str):
-    """Blob 삭제"""
-    await storage_service.delete_blob(blob_path)
-
-def generate_sas_url(blob_path: str, expiry_hours: int = 24, download: bool = False) -> str:
-    """SAS URL 생성"""
-    return storage_service.generate_sas_url(blob_path, expiry_hours, download)
+def get_storage_service() -> FamilyNewsStorageService:
+    """Storage 서비스 인스턴스 반환 (지연 초기화)"""
+    global _storage_instance
+    if _storage_instance is None:
+        _storage_instance = FamilyNewsStorageService()
+    return _storage_instance

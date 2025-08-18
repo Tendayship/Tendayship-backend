@@ -3,6 +3,7 @@ from datetime import datetime, date
 from uuid import UUID
 from pydantic import BaseModel, Field, field_serializer, field_validator
 from enum import Enum
+from .recipient import RecipientCreate
 
 class DeadlineTypeEnum(str, Enum):
     SECOND_SUNDAY = "SECOND_SUNDAY"  # 매월 둘째 주 일요일
@@ -27,6 +28,7 @@ class FamilyGroupCreate(BaseModel):
     group_name: str = Field(..., min_length=1, max_length=100, description="가족 그룹명")
     deadline_type: DeadlineTypeEnum = Field(..., description="마감일 타입")
     leader_relationship: RelationshipTypeEnum = Field(..., description="리더와 받는 분의 관계")
+    recipient_info: RecipientCreate = Field(..., description="받는 분 정보")
 
 # 가족 그룹 응답
 class FamilyGroupResponse(BaseModel):

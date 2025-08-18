@@ -96,6 +96,7 @@ class FamilyGroupSetup(BaseModel):
     deadline_type: str = Field(..., description="마감일 타입 (SECOND_SUNDAY, FOURTH_SUNDAY)")
     leader_relationship: str = Field(..., description="리더와 받는 분의 관계")
     recipient_name: str = Field(..., min_length=1, max_length=100, description="받는 분 이름")
-    recipient_address: str = Field(..., min_length=10, max_length=500, description="받는 분 주소")
+    recipient_address: str = Field(..., min_length=3, max_length=500, description="받는 분 주소")
+    recipient_address_detail: Optional[str] = Field(None, max_length=200, description="받는 분 상세주소")
     recipient_postal_code: Optional[str] = Field(None, description="우편번호")
     recipient_phone: Optional[str] = Field(None, description="받는 분 전화번호")

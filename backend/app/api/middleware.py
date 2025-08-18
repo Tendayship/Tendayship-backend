@@ -34,9 +34,20 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         
-        # 보안 헤더 추가
+        # 기존 보안 헤더
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
+        
+        # Azure 배포용 추가 보안 헤더
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://kind-sky-0070e521e.2.azurestaticapps.net; "
+            "style-src 'self' 'unsafe-inline' https://kind-sky-0070e521e.2.azurestaticapps.net; "
+            "img-src 'self' data: https: blob:; "
+            "connect-src 'self' https://tendayapp-f0a0drg2b6avh8g3.koreacentral-01.azurewebsites.net"
+        )
         
         return response

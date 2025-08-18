@@ -44,11 +44,10 @@ async def upload_profile_image(
     db: AsyncSession = Depends(get_db)
 ):
     """프로필 이미지 업로드"""
-    
     try:
-        # 이미지 업로드 및 URL 반환
+        # Azure Blob Storage에 업로드
         image_url = await post_storage_service.upload_profile_image(
-            user_id=current_user.id,
+            user_id=str(current_user.id),
             file=file
         )
         

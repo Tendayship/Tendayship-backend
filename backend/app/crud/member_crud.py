@@ -69,13 +69,30 @@ class FamilyMemberCRUD(BaseCRUD[FamilyMember, dict, dict]):
         db: AsyncSession,
         user_id: str
     ) -> Optional[FamilyMember]:
-        """사용자가 어떤 그룹에 속해있는지 확인"""
-        result = await db.execute(
-            select(FamilyMember)
-            .where(FamilyMember.user_id == user_id)
-            .options(selectinload(FamilyMember.group))
-        )
-        return result.scalars().first()
+        """사용자가 어떤 그룹에 속해있는지 확인 - 안전한 버전"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            logger.info(f"멤버십 확인 시작: user_id={user_id}")
+            
+            result = await db.execute(
+                select(FamilyMember)
+                .where(FamilyMember.user_id == user_id)
+                .limit(1)
+            )
+            member = result.scalars().first()
+            
+            if member:
+                logger.info(f"멤버십 확인 완료: group_id={member.group_id}, role={member.role}")
+            else:
+                logger.info(f"멤버십 없음: user_id={user_id}")
+                
+            return member
+            
+        except Exception as e:
+            logger.error(f"멤버십 확인 중 오류: {str(e)}")
+            return None
 
 # 싱글톤 인스턴스
 family_member_crud = FamilyMemberCRUD(FamilyMember)

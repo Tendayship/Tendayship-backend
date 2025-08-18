@@ -43,3 +43,8 @@ logs/
 *.log
 *.out
 *.pid
+
+
+*.claude
+.claude
+.claude/
