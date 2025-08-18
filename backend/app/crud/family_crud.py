@@ -8,7 +8,7 @@ import string
 from .base import BaseCRUD
 from ..models.family import FamilyGroup, FamilyMember
 from ..models.issue import Issue, IssueStatus
-from ..models.book import Book, BookStatus, DeliveryStatus
+from ..models.book import Book, ProductionStatus, DeliveryStatus
 from ..models.post import Post
 from ..schemas.family import FamilyGroupCreate
 from ..core.constants import GROUP_STATUS_ACTIVE
@@ -141,7 +141,7 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, dict, dict]):
             .where(
                 and_(
                     Issue.group_id.in_(group_ids),
-                    Book.status != BookStatus.COMPLETED,
+                    Book.status != ProductionStatus.COMPLETED,
                     Book.delivery_status != DeliveryStatus.DELIVERED
                 )
             )
