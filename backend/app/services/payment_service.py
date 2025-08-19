@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import settings
 from ..crud.subscription_crud import subscription_crud, payment_crud
-from ..models.subscription import SubscriptionStatus, PaymentStatus
+from ..models.subscription import  PaymentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +16,8 @@ class KakaoPayService:
     
     def __init__(self):
         self.secret_key = settings.KAKAO_PAY_SECRET_KEY
-        self.cid = settings.KAKAO_PAY_CID  # 단건 결제용
-        self.cid_subscription = settings.KAKAO_PAY_CID_SUBSCRIPTION  # 정기 결제용
+        self.cid = settings.KAKAO_PAY_CID  
+        self.cid_subscription = settings.KAKAO_PAY_CID_SUBSCRIPTION 
         self.api_host = settings.KAKAO_PAY_API_HOST
         self.is_test_mode = settings.PAYMENT_MODE == "TEST"
         
@@ -108,27 +108,14 @@ class KakaoPayService:
         pg_token: str,
         db: AsyncSession
     ) -> Dict[str, Any]:
-        """
-        결제 승인 (main.py의 approve_payment 로직 적용)
-        
-        Returns:
-            {
-                "aid": "승인 번호",
-                "tid": "결제 고유번호",
-                "payment_method_type": "결제 수단",
-                "amount": {...},
-                "subscription_id": "구독 ID (DB)",
-                "payment_id": "결제 ID (DB)"
-            }
-        """
+        """결제 승인 - tid를 통한 안전한 검증"""
         try:
-            # 캐시에서 결제 정보 조회
+            # 1. 캐시에서 결제 정보 조회
             payment_info = self._payment_cache.get(tid)
             if not payment_info:
                 raise ValueError(f"결제 정보를 찾을 수 없습니다: tid={tid}")
-            
+
             headers = self._get_headers()
-            
             payload = {
                 "cid": self.cid,
                 "tid": tid,
@@ -136,53 +123,68 @@ class KakaoPayService:
                 "partner_user_id": payment_info["partner_user_id"],
                 "pg_token": pg_token,
             }
-            
+
             url = f"{self.api_host}/online/v1/payment/approve"
             
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.post(url, headers=headers, json=payload)
                 
                 if response.status_code != 200:
-                    error_data = response.json() if response.text else {}
-                    logger.error(f"카카오페이 approve 실패: {response.status_code} - {error_data}")
-                    raise Exception(f"결제 승인 실패: {error_data.get('msg', '알 수 없는 오류')}")
-                
+                    try:
+                        error_data = response.json()
+                        error_message = error_data.get('error_message', error_data.get('msg', '알 수 없는 오류'))
+                    except Exception:
+                        error_message = response.text if response.text else f"HTTP {response.status_code} 오류"
+                    
+                    logger.error(f"카카오페이 approve 실패: {response.status_code} - {error_message}")
+                    raise Exception(f"결제 승인 실패: {error_message}")
+
                 result = response.json()
                 aid = result.get("aid")
-                
-                # DB에 구독 및 결제 정보 저장
-                subscription = await subscription_crud.create_subscription(
-                    db=db,
-                    group_id=payment_info["group_id"],
-                    user_id=payment_info["user_id"],
-                    billing_key=None,  # 단건 결제는 빌링키 없음
-                    amount=payment_info["amount"]
-                )
-                
-                payment = await payment_crud.create_payment(
-                    db=db,
-                    subscription_id=subscription.id,
-                    transaction_id=aid,
-                    amount=payment_info["amount"],
-                    payment_method="kakao_pay",
-                    status=PaymentStatus.SUCCESS
-                )
-                
-                # 캐시 정리
-                del self._payment_cache[tid]
-                
-                logger.info(f"결제 승인 성공: aid={aid}, subscription_id={subscription.id}")
-                
-                return {
-                    "aid": aid,
-                    "tid": tid,
-                    "payment_method_type": result.get("payment_method_type"),
-                    "amount": result.get("amount"),
-                    "subscription_id": str(subscription.id),
-                    "payment_id": str(payment.id),
-                    "approved_at": result.get("approved_at")
-                }
-                
+
+                # 2. DB에 구독 및 결제 정보 저장 (트랜잭션 처리)
+                try:
+                    subscription = await subscription_crud.create_subscription(
+                        db=db,
+                        group_id=payment_info["group_id"],
+                        user_id=payment_info["user_id"],
+                        billing_key=None,
+                        amount=payment_info["amount"]
+                    )
+
+                    payment = await payment_crud.create_payment(
+                        db=db,
+                        subscription_id=subscription.id,
+                        transaction_id=aid,
+                        amount=payment_info["amount"],
+                        payment_method="kakao_pay",
+                        status=PaymentStatus.SUCCESS
+                    )
+
+                    # 트랜잭션 커밋
+                    await db.commit()
+                    
+                    # 3. 캐시 정리
+                    del self._payment_cache[tid]
+                    
+                    logger.info(f"결제 승인 성공: aid={aid}, subscription_id={subscription.id}")
+                    
+                    return {
+                        "aid": aid,
+                        "tid": tid,
+                        "payment_method_type": result.get("payment_method_type"),
+                        "amount": result.get("amount"),
+                        "subscription_id": str(subscription.id),
+                        "payment_id": str(payment.id),
+                        "user_id": payment_info["user_id"],  # 사용자 ID 추가
+                        "approved_at": result.get("approved_at")
+                    }
+
+                except Exception as db_error:
+                    await db.rollback()
+                    logger.error(f"DB 저장 실패: {str(db_error)}")
+                    raise Exception(f"결제는 성공했으나 DB 저장 실패: {str(db_error)}")
+
         except Exception as e:
             logger.error(f"결제 승인 중 오류: {str(e)}")
             # 실패 시 캐시 정리

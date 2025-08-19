@@ -82,35 +82,28 @@ async def ready_payment(
 async def approve_payment(
     pg_token: str,
     tid: str = Query(..., description="결제 고유번호"),
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     결제 승인 - 카카오페이에서 리다이렉트 후 처리
-    
-    1. pg_token과 tid로 결제 승인
-    2. 구독 정보 DB 저장
-    3. 결제 내역 DB 저장
-    4. 성공 페이지로 리다이렉트
+    JWT 인증 없이 tid를 통해 결제 정보 검증
     """
-    
     try:
-        # 결제 승인 처리
+        # tid를 통해 결제 정보 검증 (JWT 토큰 불필요)
         approval_result = await payment_service.approve_payment(
             tid=tid,
             pg_token=pg_token,
             db=db
         )
-        
+
         # 프론트엔드 성공 페이지로 리다이렉트
         frontend_url = f"{settings.FRONTEND_URL}/subscription/success"
         return RedirectResponse(
-            url=f"{frontend_url}?subscription_id={approval_result['subscription_id']}"
+            url=f"{frontend_url}?subscription_id={approval_result['subscription_id']}&user_id={approval_result.get('user_id', '')}"
         )
-        
+
     except Exception as e:
         logger.error(f"결제 승인 실패: {str(e)}")
-        # 실패 페이지로 리다이렉트
         frontend_url = f"{settings.FRONTEND_URL}/subscription/fail"
         return RedirectResponse(url=f"{frontend_url}?error={str(e)}")
 
