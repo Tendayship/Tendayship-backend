@@ -124,7 +124,6 @@ class KakaoPayService:
     ) -> Dict[str, Any]:
         """결제 승인 - tid를 통한 안전한 검증"""
         try:
-            # 1. 캐시에서 결제 정보 조회
             payment_info = self._payment_cache.get(tid)
             if not payment_info:
                 raise ValueError(f"결제 정보를 찾을 수 없습니다: tid={tid}")
@@ -139,55 +138,49 @@ class KakaoPayService:
             }
 
             url = f"{self.api_host}/online/v1/payment/approve"
-            
             async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.post(url, headers=headers, json=payload)
-                
                 if response.status_code != 200:
                     try:
                         error_data = response.json()
                         error_message = error_data.get('error_message', error_data.get('msg', '알 수 없는 오류'))
                     except Exception:
                         error_message = response.text if response.text else f"HTTP {response.status_code} 오류"
-                    
                     logger.error(f"카카오페이 approve 실패: {response.status_code} - {error_message}")
                     raise Exception(f"결제 승인 실패: {error_message}")
 
                 result = response.json()
                 aid = result.get("aid")
 
-  
                 try:
                     # 구독 생성
                     subscription = await subscription_crud.create_subscription(
                         db=db,
                         group_id=payment_info["group_id"],
                         user_id=payment_info["user_id"],
-                        amount=payment_info["amount"]
+                        amount=payment_info["amount"],
                     )
 
+                    await db.flush()
+                    await db.refresh(subscription)
 
-                    await db.flush()           # DB에 반영하여 ID 할당
-                    await db.refresh(subscription)  # 할당된 ID를 객체에 로드
-
-                    # 이제 subscription.id가 정상적으로 할당됨
+                    # 결제 기록 생성
                     payment = await payment_crud.create_payment(
                         db=db,
-                        subscription_id=subscription.id,  
+                        subscription_id=subscription.id,
                         transaction_id=aid,
                         amount=payment_info["amount"],
                         payment_method="kakao_pay",
-                        status=PaymentStatus.SUCCESS
+                        status=PaymentStatus.SUCCESS,
                     )
 
-                    # 트랜잭션 커밋
                     await db.commit()
-                    
-                    # 3. 캐시 정리
-                    del self._payment_cache[tid]
-                    
+
+                    # 캐시 정리
+                    if tid in self._payment_cache:
+                        del self._payment_cache[tid]
+
                     logger.info(f"결제 승인 성공: aid={aid}, subscription_id={subscription.id}")
-                    
                     return {
                         "aid": aid,
                         "tid": tid,
@@ -196,7 +189,7 @@ class KakaoPayService:
                         "subscription_id": str(subscription.id),
                         "payment_id": str(payment.id),
                         "user_id": payment_info["user_id"],
-                        "approved_at": result.get("approved_at")
+                        "approved_at": result.get("approved_at"),
                     }
 
                 except Exception as db_error:
@@ -206,10 +199,10 @@ class KakaoPayService:
 
         except Exception as e:
             logger.error(f"결제 승인 중 오류: {str(e)}")
-            # 실패 시 캐시 정리
             if tid in self._payment_cache:
                 del self._payment_cache[tid]
-    
+            raise
+
     async def cancel_payment(
         self,
         tid: str,
@@ -224,7 +217,7 @@ class KakaoPayService:
                 "tid": tid,
                 "cancel_amount": cancel_amount,
                 "cancel_tax_free_amount": 0,
-                "cancel_reason": cancel_reason
+                "cancel_reason": cancel_reason,
             }
 
             logger.info(f"카카오페이 취소 요청: tid={tid}, amount={cancel_amount}, cid={self.cid}")
@@ -232,28 +225,22 @@ class KakaoPayService:
             url = f"{self.api_host}/online/v1/payment/cancel"
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(url, headers=headers, json=payload)
-
                 if response.status_code != 200:
                     try:
                         error_data = response.json()
                         error_code = error_data.get('error_code', 'UNKNOWN')
                         error_message = error_data.get('error_message', error_data.get('msg', '알 수 없는 오류'))
-                        
                         logger.error(f"카카오페이 취소 실패: code={error_code}, message={error_message}")
                         logger.error(f"요청 파라미터: {payload}")
-                        
-                        # 🔥 특정 에러 코드에 대한 명확한 메시지
                         if error_code == -721:
                             raise Exception(f"유효하지 않은 결제 ID이거나 이미 취소된 결제입니다 ({error_code}): {error_message}")
                         elif error_code == -780:
                             raise Exception(f"이미 취소된 결제입니다 ({error_code}): {error_message}")
                         else:
                             raise Exception(f"결제 취소 실패 ({error_code}): {error_message}")
-                            
                     except Exception as parse_error:
                         if "결제 취소 실패" in str(parse_error):
                             raise parse_error
-                        
                         error_text = response.text
                         logger.error(f"카카오페이 응답 파싱 실패: {str(parse_error)}, response_text={error_text}")
                         raise Exception(f"결제 취소 실패: HTTP {response.status_code} - {error_text}")
