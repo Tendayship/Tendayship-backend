@@ -50,6 +50,17 @@ class SubscriptionResponse(BaseModel):
         if isinstance(value, UUID):
             return str(value)
         return str(value) if value else ""
+    
+class SubscriptionHistoryResponse(BaseModel):
+    id: str
+    subscription_id: str
+    action: str  # e.g. 'CREATED', 'CANCELLED', 'REACTIVATED'
+    status: str  # e.g. 'active', 'cancelled'
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    cancel_reason: Optional[str] = None
+    amount: Optional[Decimal] = None
+    created_at: datetime
 
 # 결제 요청
 class PaymentRequest(BaseModel):
