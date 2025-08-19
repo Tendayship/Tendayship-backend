@@ -1,18 +1,20 @@
 from typing import Optional, List
 from pydantic_settings import BaseSettings
-from pydantic import Field, validator
-
+from pydantic import Field, field_validator
+import re
 
 class Settings(BaseSettings):
     """
     애플리케이션 전체 설정을 관리하는 클래스
     환경 변수를 자동으로 읽어와 검증하고 타입을 보장합니다.
     """
+
     # 기본 애플리케이션 설정
     APP_NAME: str = "Family News Service"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
 
+    # 관리자 설정 - 환경변수에서 쉼표 구분 문자열로 받음
     ADMIN_EMAILS: List[str] = Field(
         default=["admin@familynews.com"],
         description="관리자 이메일 목록"
@@ -22,8 +24,8 @@ class Settings(BaseSettings):
     API_PREFIX: str = "/api"
     ALLOWED_HOSTS: List[str] = Field(
         default=[
-            "localhost", 
-            "127.0.0.1", 
+            "localhost",
+            "127.0.0.1",
             "tendayapp-f0a0drg2b6avh8g3.koreacentral-01.azurewebsites.net"
         ],
         description="허용된 호스트 목록"
@@ -43,22 +45,27 @@ class Settings(BaseSettings):
         ...,
         description="Azure PostgreSQL 서버 주소"
     )
+
     POSTGRES_USER: str = Field(
         ...,
         description="PostgreSQL 사용자명"
     )
+
     POSTGRES_PASSWORD: str = Field(
         ...,
         description="PostgreSQL 비밀번호"
     )
+
     POSTGRES_DB: str = Field(
         default="family_news_db",
         description="데이터베이스 이름"
     )
+
     POSTGRES_PORT: int = Field(
         default=5432,
         description="PostgreSQL 포트 번호"
     )
+
     POSTGRES_SSL_MODE: str = Field(
         default="require",
         description="SSL 연결 모드"
@@ -77,14 +84,17 @@ class Settings(BaseSettings):
         ...,
         description="Azure Storage 연결 문자열"
     )
+
     AZURE_STORAGE_ACCOUNT_NAME: str = Field(
         ...,
         description="Storage Account 이름"
     )
+
     AZURE_STORAGE_ACCOUNT_KEY: str = Field(
         ...,
         description="Storage Account 액세스 키"
     )
+
     AZURE_STORAGE_CONTAINER_NAME: str = Field(
         default="family-news",
         description="메인 컨테이너 이름"
@@ -95,6 +105,7 @@ class Settings(BaseSettings):
         default=None,
         description="Azure Content Safety API 엔드포인트"
     )
+
     CONTENT_SAFETY_KEY: Optional[str] = Field(
         default=None,
         description="Content Safety API 키"
@@ -106,6 +117,7 @@ class Settings(BaseSettings):
         min_length=32,
         description="세션 암호화용 비밀 키"
     )
+
     SESSION_EXPIRE_MINUTES: int = Field(
         default=1440,
         description="세션 만료 시간"
@@ -116,10 +128,12 @@ class Settings(BaseSettings):
         ...,
         description="카카오 앱 REST API 키"
     )
+
     KAKAO_CLIENT_SECRET: Optional[str] = Field(
         default=None,
         description="카카오 앱 시크릿"
     )
+
     KAKAO_REDIRECT_URI: str = Field(
         ...,
         description="카카오 로그인 리다이렉트 URI"
@@ -131,16 +145,19 @@ class Settings(BaseSettings):
         env="KAKAO_PAY_SECRET_KEY",
         description="카카오페이 시크릿 키"
     )
+
     KAKAO_PAY_CID: str = Field(
         default="TC0ONETIME",
         env="KAKAO_PAY_CID",
         description="카카오페이 가맹점 코드"
     )
+
     KAKAO_PAY_CID_SUBSCRIPTION: str = Field(
         default="TCSUBSCRIP",
         env="KAKAO_PAY_CID_SUBSCRIPTION",
         description="카카오페이 정기결제용 가맹점 코드"
     )
+
     KAKAO_PAY_API_HOST: str = Field(
         default="https://open-api.kakaopay.com",
         env="KAKAO_PAY_API_HOST",
@@ -151,10 +168,12 @@ class Settings(BaseSettings):
         default="https://tendayapp-f0a0drg2b6avh8g3.koreacentral-01.azurewebsites.net/api/subscription/approve",
         env="PAYMENT_SUCCESS_URL"
     )
+
     PAYMENT_CANCEL_URL: str = Field(
         default="https://tendayapp-f0a0drg2b6avh8g3.koreacentral-01.azurewebsites.net/api/subscription/cancel",
         env="PAYMENT_CANCEL_URL"
     )
+
     PAYMENT_FAIL_URL: str = Field(
         default="https://tendayapp-f0a0drg2b6avh8g3.koreacentral-01.azurewebsites.net/api/subscription/fail",
         env="PAYMENT_FAIL_URL"
@@ -185,11 +204,12 @@ class Settings(BaseSettings):
         default=10 * 1024 * 1024,
         description="최대 업로드 파일 크기"
     )
+
     MAX_IMAGES_PER_POST: int = Field(
         default=4,
         description="게시글당 최대 이미지 수"
     )
-    
+
     # 게시글 제한 추가
     MAX_POSTS_PER_MONTH: int = Field(
         default=20,
@@ -201,6 +221,7 @@ class Settings(BaseSettings):
         default=50,
         description="게시글 최소 글자 수"
     )
+
     POST_MAX_LENGTH: int = Field(
         default=100,
         description="게시글 최대 글자 수"
@@ -211,6 +232,7 @@ class Settings(BaseSettings):
         default=8,
         description="초대 코드 길이"
     )
+
     INVITE_CODE_EXPIRE_DAYS: int = Field(
         default=7,
         description="초대 코드 유효 기간"
@@ -233,38 +255,42 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
         case_sensitive = True
 
-    @validator("SECRET_KEY")
+    @field_validator("SECRET_KEY")
+    @classmethod
     def validate_secret_key(cls, v):
         if len(v) < 32:
             raise ValueError("SECRET_KEY는 최소 32자 이상이어야 합니다")
         return v
 
-    @validator("KAKAO_PAY_SECRET_KEY")
-    def validate_kakao_pay_key(cls, v, values):
-        if values.get("PAYMENT_MODE") == "PRODUCTION" and not v:
+    @field_validator("KAKAO_PAY_SECRET_KEY")
+    @classmethod
+    def validate_kakao_pay_key(cls, v, info):
+        if info.data.get("PAYMENT_MODE") == "PRODUCTION" and not v:
             raise ValueError("Production 모드에서는 KAKAO_PAY_SECRET_KEY가 필수입니다")
         return v
 
-    @validator("ALLOWED_HOSTS", pre=True)
+    @field_validator("ALLOWED_HOSTS", mode="before")
+    @classmethod
     def parse_allowed_hosts(cls, v):
         if isinstance(v, str):
             return [host.strip() for host in v.split(",")]
         return v
-    
-    @validator("ADMIN_EMAILS", pre=True)
+
+    @field_validator("ADMIN_EMAILS", mode="before")
+    @classmethod
     def parse_admin_emails(cls, v):
         """쉼표로 구분된 관리자 이메일을 파싱"""
         if isinstance(v, str):
-            return [email.strip() for email in v.split(",") if email.strip()]
+            return [email.strip() for email in re.split(r'[,;\s]+', v) if email.strip()]
         return v
 
-    @validator("ADMIN_EMAILS")
+    @field_validator("ADMIN_EMAILS")
+    @classmethod
     def validate_admin_emails(cls, v):
         """관리자 이메일 형식 검증"""
         if not v or len(v) == 0:
             raise ValueError("최소 하나의 관리자 이메일이 필요합니다")
         
-        import re
         email_pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
         
         for email in v:
@@ -273,7 +299,4 @@ class Settings(BaseSettings):
         
         return v
 
-
 settings = Settings()
-
-
