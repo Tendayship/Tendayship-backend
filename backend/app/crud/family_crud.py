@@ -141,7 +141,7 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, dict, dict]):
             .where(
                 and_(
                     Issue.group_id.in_(group_ids),
-                    Book.status != ProductionStatus.COMPLETED,
+                    Book.production_status != ProductionStatus.COMPLETED,
                     Book.delivery_status != DeliveryStatus.DELIVERED
                 )
             )
