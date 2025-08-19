@@ -163,19 +163,31 @@ async def get_subscription_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="구독을 찾을 수 없습니다"
         )
-    
+
     # 권한 확인
     if subscription.user_id != current_user.id:
         membership = await family_member_crud.get_by_user_and_group(
             db, current_user.id, subscription.group_id
         )
+        
         if not membership:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="이 구독 정보에 접근할 권한이 없습니다"
             )
-    
-    return subscription
+
+    return SubscriptionResponse(
+        id=str(subscription.id),
+        group_id=str(subscription.group_id),
+        user_id=str(subscription.user_id),
+        status=subscription.status,
+        start_date=subscription.start_date,
+        end_date=subscription.end_date,
+        next_billing_date=subscription.next_billing_date,
+        amount=subscription.amount,
+        created_at=subscription.created_at,
+        updated_at=subscription.updated_at
+    )
 
 @router.post("/{subscription_id}/cancel")
 async def cancel_subscription(
@@ -203,6 +215,7 @@ async def cancel_subscription(
     try:
         # 최근 결제 내역 조회
         recent_payment = await payment_crud.get_recent_payment(db, subscription_id)
+        
         if recent_payment and recent_payment.transaction_id:
             # 카카오페이 결제 취소
             await payment_service.cancel_payment(
@@ -210,19 +223,22 @@ async def cancel_subscription(
                 cancel_amount=int(recent_payment.amount),
                 cancel_reason=reason
             )
-        
+
         # 구독 상태 변경
         cancelled_subscription = await subscription_crud.cancel_subscription(
             db, subscription_id, reason
         )
         
+        await db.commit()
+
         return {
             "message": "구독이 취소되었습니다",
             "cancelled_at": cancelled_subscription.end_date,
             "refund_amount": recent_payment.amount if recent_payment else 0
         }
-        
+
     except Exception as e:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"구독 취소 중 오류: {str(e)}"

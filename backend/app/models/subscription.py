@@ -74,6 +74,7 @@ class Subscription(Base, UUIDMixin, TimestampMixin):
     start_date = Column(Date, nullable=False, comment="시작일")
     end_date = Column(Date, nullable=True, comment="종료일")
     next_billing_date = Column(Date, nullable=True, comment="다음 결제일")
+    cancel_reason = Column(Text, nullable=True, comment="취소 사유")
     
     # 금액
     amount = Column(Numeric(10, 0), nullable=False, comment="구독료 (원)")
