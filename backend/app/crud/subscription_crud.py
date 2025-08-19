@@ -103,7 +103,6 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
         db: AsyncSession,
         group_id: str,
         user_id: str,
-        billing_key: str,
         amount: Decimal = Decimal("6900")
     ) -> Subscription:
         """새 구독 생성"""
@@ -112,7 +111,6 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
         if existing:
             raise ValueError("이미 활성 구독이 존재합니다")
         
-        # 다음 결제일 계산 (30일 후)
         next_billing_date = date.today() + timedelta(days=30)
         
         subscription = Subscription(
@@ -122,7 +120,7 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
             start_date=date.today(),
             next_billing_date=next_billing_date,
             amount=amount,
-            billing_key=billing_key
+            payment_method="kakao_pay"
         )
         
         db.add(subscription)
@@ -171,8 +169,6 @@ class PaymentCRUD(BaseCRUD[Payment, dict, dict]):
             payment.paid_at = datetime.now()
         
         db.add(payment)
-        # Transaction management moved to upper layer
-        # Note: Subscription update should be handled in service layer
         return payment
     
     async def get_by_subscription(
@@ -189,6 +185,20 @@ class PaymentCRUD(BaseCRUD[Payment, dict, dict]):
             .limit(limit)
         )
         return result.scalars().all()
+    
+    async def get_recent_payment(
+        self,
+        db: AsyncSession,
+        subscription_id: str
+    ) -> Optional[Payment]:
+        """구독의 최근 결제 내역 1건 조회"""
+        result = await db.execute(
+            select(Payment)
+            .where(Payment.subscription_id == subscription_id)
+            .order_by(desc(Payment.created_at))
+            .limit(1)
+        )
+        return result.scalars().first()
 
 # 싱글톤 인스턴스  
 subscription_crud = SubscriptionCRUD(Subscription)

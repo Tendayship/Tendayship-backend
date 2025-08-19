@@ -162,7 +162,6 @@ class KakaoPayService:
                         db=db,
                         group_id=payment_info["group_id"],
                         user_id=payment_info["user_id"],
-                        billing_key=None,
                         amount=payment_info["amount"]
                     )
 
