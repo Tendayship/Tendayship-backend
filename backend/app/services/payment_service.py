@@ -227,7 +227,6 @@ class KakaoPayService:
                 "cancel_reason": cancel_reason
             }
 
-
             logger.info(f"카카오페이 취소 요청: tid={tid}, amount={cancel_amount}, cid={self.cid}")
 
             url = f"{self.api_host}/online/v1/payment/cancel"
@@ -243,8 +242,18 @@ class KakaoPayService:
                         logger.error(f"카카오페이 취소 실패: code={error_code}, message={error_message}")
                         logger.error(f"요청 파라미터: {payload}")
                         
-                        raise Exception(f"결제 취소 실패 ({error_code}): {error_message}")
+                        # 🔥 특정 에러 코드에 대한 명확한 메시지
+                        if error_code == -721:
+                            raise Exception(f"유효하지 않은 결제 ID이거나 이미 취소된 결제입니다 ({error_code}): {error_message}")
+                        elif error_code == -780:
+                            raise Exception(f"이미 취소된 결제입니다 ({error_code}): {error_message}")
+                        else:
+                            raise Exception(f"결제 취소 실패 ({error_code}): {error_message}")
+                            
                     except Exception as parse_error:
+                        if "결제 취소 실패" in str(parse_error):
+                            raise parse_error
+                        
                         error_text = response.text
                         logger.error(f"카카오페이 응답 파싱 실패: {str(parse_error)}, response_text={error_text}")
                         raise Exception(f"결제 취소 실패: HTTP {response.status_code} - {error_text}")

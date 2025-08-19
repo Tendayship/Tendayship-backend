@@ -9,6 +9,7 @@ from ...core.config import settings
 from ...database.session import get_db
 from ...api.dependencies import get_current_user
 from ...models.user import User
+from ...models.subscription import SubscriptionStatus
 from ...crud.subscription_crud import subscription_crud, payment_crud
 from ...crud.member_crud import family_member_crud
 from ...services.payment_service import payment_service
@@ -197,34 +198,56 @@ async def cancel_subscription(
     db: AsyncSession = Depends(get_db)
 ):
     """구독 취소 (환불)"""
-    
     subscription = await subscription_crud.get(db, subscription_id)
     if not subscription:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="구독을 찾을 수 없습니다"
         )
-    
+
     # 권한 확인
     if subscription.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="본인의 구독만 취소할 수 있습니다"
         )
-    
-    try:
-        # 최근 결제 내역 조회
-        recent_payment = await payment_crud.get_recent_payment(db, subscription_id)
-        
-        if recent_payment and recent_payment.transaction_id:
-            # 카카오페이 결제 취소
-            await payment_service.cancel_payment(
-                tid=recent_payment.transaction_id,
-                cancel_amount=int(recent_payment.amount),
-                cancel_reason=reason
-            )
 
-        # 구독 상태 변경
+    # 🔥 이미 취소된 구독인지 확인
+    if subscription.status == SubscriptionStatus.CANCELLED:
+        return {
+            "message": "이미 취소된 구독입니다",
+            "cancelled_at": subscription.end_date,
+            "refund_amount": 0
+        }
+
+    try:
+        recent_payment = await payment_crud.get_recent_payment(db, subscription_id)
+        refund_amount = 0
+        payment_cancel_status = "no_payment"
+
+        # 🔥 결제 취소 시도 (실패해도 구독 취소는 진행)
+        if recent_payment and recent_payment.transaction_id:
+            try:
+                await payment_service.cancel_payment(
+                    tid=recent_payment.transaction_id,
+                    cancel_amount=int(recent_payment.amount),
+                    cancel_reason=reason
+                )
+                refund_amount = recent_payment.amount
+                payment_cancel_status = "success"
+                logger.info(f"결제 취소 성공: subscription_id={subscription_id}")
+                
+            except Exception as payment_error:
+                logger.warning(f"결제 취소 실패하지만 구독은 취소 처리: {str(payment_error)}")
+                payment_cancel_status = "failed"
+                
+                # 🔥 특정 에러 코드에 따른 처리
+                error_str = str(payment_error)
+                if "invalid tid" in error_str or "-721" in error_str:
+                    logger.info("이미 취소된 결제이거나 유효하지 않은 TID")
+                    payment_cancel_status = "already_cancelled"
+
+        # 🔥 구독 상태 변경 (결제 취소 성공 여부와 관계없이 진행)
         cancelled_subscription = await subscription_crud.cancel_subscription(
             db, subscription_id, reason
         )
@@ -234,7 +257,13 @@ async def cancel_subscription(
         return {
             "message": "구독이 취소되었습니다",
             "cancelled_at": cancelled_subscription.end_date,
-            "refund_amount": recent_payment.amount if recent_payment else 0
+            "refund_amount": refund_amount,
+            "payment_cancel_status": payment_cancel_status,
+            "details": {
+                "success": payment_cancel_status == "success",
+                "already_cancelled": payment_cancel_status == "already_cancelled",
+                "payment_failed": payment_cancel_status == "failed"
+            }
         }
 
     except Exception as e:
