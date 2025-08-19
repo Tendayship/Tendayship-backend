@@ -11,30 +11,21 @@ from ...crud.issue_crud import issue_crud
 from ...crud.book_crud import book_crud
 from ...crud.post_crud import post_crud
 from ...services.pdf_service import pdf_service
-from ...schemas.book import BookResponse, BookStatusUpdate
-from ...core.constants import ADMIN_EMAILS
+from ...schemas.book import BookStatusUpdate
+from ...core.config import settings
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 async def verify_admin_user(current_user: User = Depends(get_current_user)):
-    """관리자 권한 확인 - 활성화 상태 및 관리자 이메일 체크"""
-    
-    # 1. 사용자 활성화 상태 체크
+    """관리자 권한 확인"""
     if not current_user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="비활성화된 사용자입니다"
         )
     
-    # 2. 사용자 삭제 상태 체크 (is_deleted가 있다면)
-    if hasattr(current_user, 'is_deleted') and current_user.is_deleted:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="삭제된 사용자입니다"
-        )
-    
-    # 3. 관리자 권한 체크
-    if current_user.email not in ADMIN_EMAILS:
+    # 환경변수에서 가져온 관리자 이메일 목록 사용
+    if current_user.email not in settings.ADMIN_EMAILS:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="관리자 권한이 필요합니다"

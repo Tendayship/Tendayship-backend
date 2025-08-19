@@ -20,9 +20,8 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 @router.get("/kakao/callback")
 async def kakao_oauth_callback(
     code: Optional[str] = None,
-    token: Optional[str] = None,  # ✅ 추가
-    user_id: Optional[str] = None,  # ✅ 추가
-    state: Optional[str] = None,
+    token: Optional[str] = None,  
+    user_id: Optional[str] = None,  
     error: Optional[str] = None,
     error_description: Optional[str] = None,
     db: AsyncSession = Depends(get_db)

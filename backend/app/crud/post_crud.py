@@ -1,3 +1,4 @@
+import logging
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func, desc
@@ -8,8 +9,10 @@ from ..models.post import Post
 from ..schemas.post import PostCreate, PostUpdate
 from ..models.issue import Issue
 
-class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
+logger = logging.getLogger(__name__)
 
+class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
+ 
     async def create_post(
         self,
         db: AsyncSession,

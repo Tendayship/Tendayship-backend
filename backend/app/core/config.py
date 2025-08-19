@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     APP_NAME: str = "Family News Service"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
+    
+    ADMIN_EMAILS: List[str] = Field(
+        default=["admin@familynews.com"],
+        description="관리자 이메일 목록"
+    )
 
     # API 설정
     API_PREFIX: str = "/api"

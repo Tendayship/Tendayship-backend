@@ -1,6 +1,4 @@
-"""
-Application constants for role definitions, limits, and configuration.
-"""
+from .config import settings
 
 # Role constants
 ROLE_LEADER = "LEADER"
@@ -10,12 +8,8 @@ ROLE_MEMBER = "MEMBER"
 MAX_GROUP_MEMBERS = 20
 MAX_POSTS_PER_ISSUE = 20
 
-# Admin configuration
-# TODO: Move to environment variables in production
-ADMIN_EMAILS = [
-    "admin@familynews.com",
-    "kakao_4401480828@temp.kakao"
-]
+# Admin configuration - 환경변수에서 가져옴
+ADMIN_EMAILS = settings.ADMIN_EMAILS
 
 # Status constants
 GROUP_STATUS_ACTIVE = "ACTIVE"
