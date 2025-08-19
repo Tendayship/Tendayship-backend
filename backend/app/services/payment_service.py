@@ -47,7 +47,6 @@ class KakaoPayService:
             partner_user_id = str(user_id)
             headers = self._get_headers()
             
-
             temp_payment_id = str(uuid.uuid4())
             
 
@@ -63,26 +62,34 @@ class KakaoPayService:
                 "quantity": 1,
                 "total_amount": int(amount),
                 "tax_free_amount": 0,
-                "approval_url": approval_url_with_id,    
-                "cancel_url": cancel_url_with_id,        
-                "fail_url": fail_url_with_id,           
+                "approval_url": approval_url_with_id,
+                "cancel_url": cancel_url_with_id,
+                "fail_url": fail_url_with_id,
             }
-            
+
             url = f"{self.api_host}/online/v1/payment/ready"
             
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.post(url, headers=headers, json=payload)
                 
                 if response.status_code != 200:
-                    error_data = response.json() if response.text else {}
-                    logger.error(f"카카오페이 ready 실패: {response.status_code} - {error_data}")
-                    raise Exception(f"결제 준비 실패: {error_data.get('msg', '알 수 없는 오류')}")
-                
+                    try:
+                        error_data = response.json()
+                        error_message = error_data.get('error_message', error_data.get('msg', '알 수 없는 오류'))
+                    except Exception:
+                        error_message = response.text if response.text else f"HTTP {response.status_code} 오류"
+                    
+                    logger.error(f"카카오페이 ready 실패: {response.status_code} - {error_message}")
+                    raise Exception(f"결제 준비 실패: {error_message}")
+
                 result = response.json()
                 tid = result.get("tid")
                 
-                # 결제 정보 캐시 저장 (approve 시 필요)
-                self._payment_cache[tid] = {
+                if not tid:
+                    raise Exception("결제 TID를 받지 못했습니다.")
+                
+                payment_info = {
+                    "tid": tid,
                     "partner_order_id": partner_order_id,
                     "partner_user_id": partner_user_id,
                     "user_id": user_id,
@@ -91,7 +98,11 @@ class KakaoPayService:
                     "created_at": datetime.now()
                 }
                 
-                logger.info(f"결제 준비 성공: tid={tid}, order_id={partner_order_id}")
+                # temp_id와 tid 모두를 키로 저장
+                self._payment_cache[temp_payment_id] = payment_info
+                self._payment_cache[tid] = payment_info
+
+                logger.info(f"결제 준비 성공: tid={tid}, temp_id={temp_payment_id}")
                 
                 return {
                     "tid": tid,
@@ -100,10 +111,7 @@ class KakaoPayService:
                     "partner_order_id": partner_order_id,
                     "partner_user_id": partner_user_id
                 }
-                
-        except httpx.RequestError as e:
-            logger.error(f"카카오페이 API 요청 실패: {str(e)}")
-            raise Exception(f"결제 서비스 연결 실패: {str(e)}")
+
         except Exception as e:
             logger.error(f"결제 준비 중 오류: {str(e)}")
             raise

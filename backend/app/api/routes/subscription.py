@@ -81,15 +81,12 @@ async def ready_payment(
 @router.get("/approve")
 async def approve_payment(
     pg_token: str,
-    temp_id: str = Query(..., description="임시 결제 ID"), 
+    temp_id: str = Query(..., description="임시 결제 ID"),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    결제 승인 - 카카오페이에서 리다이렉트 후 처리
-    temp_id를 통해 실제 tid 조회 후 결제 승인 처리
-    """
+    """결제 승인 - temp_id를 통해 실제 tid 조회 후 결제 승인 처리"""
     try:
-
+        # temp_id로 결제 정보 조회
         payment_info = payment_service._payment_cache.get(temp_id)
         if not payment_info:
             raise Exception(f"결제 정보를 찾을 수 없습니다: temp_id={temp_id}")
@@ -98,14 +95,20 @@ async def approve_payment(
         if not actual_tid:
             raise Exception("결제 TID를 찾을 수 없습니다")
 
-
+        # 실제 tid로 결제 승인 처리
         approval_result = await payment_service.approve_payment(
             tid=actual_tid,
             pg_token=pg_token,
             db=db
         )
 
+        # 성공 시 캐시 정리
+        if temp_id in payment_service._payment_cache:
+            del payment_service._payment_cache[temp_id]
+        if actual_tid in payment_service._payment_cache:
+            del payment_service._payment_cache[actual_tid]
 
+        # 프론트엔드 성공 페이지로 리다이렉트
         frontend_url = f"{settings.FRONTEND_URL}/subscription/success"
         return RedirectResponse(
             url=f"{frontend_url}?subscription_id={approval_result['subscription_id']}&user_id={approval_result.get('user_id', '')}"
@@ -113,6 +116,11 @@ async def approve_payment(
 
     except Exception as e:
         logger.error(f"결제 승인 실패: {str(e)}")
+        
+        # 실패 시에도 캐시 정리
+        if temp_id in payment_service._payment_cache:
+            del payment_service._payment_cache[temp_id]
+        
         frontend_url = f"{settings.FRONTEND_URL}/subscription/fail"
         return RedirectResponse(url=f"{frontend_url}?error={str(e)}")
 
