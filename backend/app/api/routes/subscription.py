@@ -144,19 +144,17 @@ async def get_my_subscriptions(
     status_filter: str | None = Query(None, description="all이면 전체, 기본(None)은 활성만"),
 ):
     """
-    내 구독 목록 조회
-    - 기본: 활성 구독만
-    - status_filter=all: 전체 구독(취소, 만료 포함)
+    내 구독 목록
+    - 기본: 활성만
+    - status_filter=all: 전체(취소/만료 포함)
     """
     all_subs = await subscription_crud.get_by_user_id(db, current_user.id)
-
     if status_filter == "all":
         target = all_subs
     else:
-        # 활성만 필터
         target = [
             sub for sub in all_subs
-            if str(sub.status).upper() in ("ACTIVE", "SubscriptionStatus.ACTIVE")
+            if str(sub.status).lower() == "active"
         ]
 
     return [
