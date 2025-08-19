@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import settings
 from ..crud.subscription_crud import subscription_crud, payment_crud
-from ..models.subscription import SubscriptionStatus, PaymentStatus
+from ..models.subscription import PaymentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +16,8 @@ class KakaoPayService:
     
     def __init__(self):
         self.secret_key = settings.KAKAO_PAY_SECRET_KEY
-        self.cid = settings.KAKAO_PAY_CID  # 단건 결제용
-        self.cid_subscription = settings.KAKAO_PAY_CID_SUBSCRIPTION  # 정기 결제용
+        self.cid = settings.KAKAO_PAY_CID  
+        self.cid_subscription = settings.KAKAO_PAY_CID_SUBSCRIPTION
         self.api_host = settings.KAKAO_PAY_API_HOST
         self.is_test_mode = settings.PAYMENT_MODE == "TEST"
         
@@ -25,58 +25,38 @@ class KakaoPayService:
         self._payment_cache: Dict[str, Dict] = {}
     
     def _get_headers(self) -> Dict[str, str]:
-        """카카오페이 API 헤더"""
         if not self.secret_key:
-            raise ValueError("카카오페이 시크릿 키가 설정되지 않았습니다. KAKAO_PAY_SECRET_KEY 환경변수를 확인하세요.")
+            raise ValueError("카카오페이 시크릿 키가 설정되지 않았습니다.")
         
-        # 카카오페이 2024 업데이트된 형식 사용
         return {
-            "Authorization": f"SECRET_KEY {self.secret_key}",
-            "Content-Type": "application/json;charset=UTF-8",
+            "Authorization": f"KakaoAK {self.secret_key}",
+            "Content-Type": "application/x-www-form-urlencoded;charset=utf-8"
         }
     
-    async def create_single_payment(
-        self,
-        user_id: str,
-        group_id: str,
-        amount: Decimal = Decimal("6900")
-    ) -> Dict[str, Any]:
-        """
-        단건 결제 준비 (main.py의 ready_payment 로직 적용)
-        
-        Returns:
-            {
-                "tid": "결제 고유번호",
-                "next_redirect_pc_url": "PC 결제 URL",
-                "next_redirect_mobile_url": "모바일 결제 URL",
-                "partner_order_id": "주문번호",
-                "partner_user_id": "사용자ID"
-            }
-        """
+    async def create_single_payment(self, user_id: str, group_id: str, amount: Decimal = Decimal("6900")):
         try:
-            # 주문 ID 생성
             partner_order_id = f"FNS_{group_id[:8]}_{int(datetime.now().timestamp())}"
             partner_user_id = str(user_id)
             
             headers = self._get_headers()
             
             payload = {
-                "cid": self.cid,
+                "cid": "TC0ONETIME",
                 "partner_order_id": partner_order_id,
                 "partner_user_id": partner_user_id,
                 "item_name": "가족 소식 서비스 월 구독",
-                "quantity": 1,
-                "total_amount": int(amount),
-                "tax_free_amount": 0,
+                "quantity": "1",
+                "total_amount": str(int(amount)),
+                "tax_free_amount": "0",
                 "approval_url": settings.PAYMENT_SUCCESS_URL,
                 "cancel_url": settings.PAYMENT_CANCEL_URL,
                 "fail_url": settings.PAYMENT_FAIL_URL,
             }
-            
-            url = f"{self.api_host}/online/v1/payment/ready"
+
+            url = f"{self.api_host}/v1/payment/ready"
             
             async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(url, headers=headers, json=payload)
+                response = await client.post(url, headers=headers, data=payload)
                 
                 if response.status_code != 200:
                     error_data = response.json() if response.text else {}
