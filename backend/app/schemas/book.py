@@ -1,5 +1,5 @@
 from typing import Optional, List, Union
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID
 from pydantic import BaseModel, Field, field_serializer, field_validator
 from enum import Enum
@@ -42,7 +42,7 @@ class BookResponse(BaseModel):
     
     # 회차 정보 포함
     issue_number: Optional[int] = None
-    issue_deadline: Optional[datetime] = None
+    issue_deadline: Optional[date] = None
     post_count: Optional[int] = None
     
     @field_validator('id', 'issue_id', mode='before')

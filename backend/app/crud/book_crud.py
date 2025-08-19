@@ -1,14 +1,14 @@
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from sqlalchemy import desc, select, and_, or_
 from sqlalchemy.orm import selectinload, joinedload
 from datetime import datetime
 
 from .base import BaseCRUD
 from ..models.book import Book, ProductionStatus, DeliveryStatus
 from ..models.issue import Issue
-from ..schemas.book import BookCreate, BookStatusUpdate
-
+from ..schemas.book import BookCreate
+from ..models.family import FamilyGroup
 class BookCRUD(BaseCRUD[Book, BookCreate, dict]):
     
     async def get_by_issue_id(
@@ -40,13 +40,14 @@ class BookCRUD(BaseCRUD[Book, BookCreate, dict]):
             .join(Issue)
             .where(Issue.group_id == group_id)
             .options(
+                selectinload(Book.issue),
                 selectinload(Book.issue).selectinload(Issue.posts)
             )
             .order_by(Book.created_at.desc())
             .offset(skip)
             .limit(limit)
         )
-        return result.scalars().all()
+        return result.scalars().unique().all()
     
     async def get_pending_books_by_group(
         self,
@@ -70,11 +71,8 @@ class BookCRUD(BaseCRUD[Book, BookCreate, dict]):
         )
         return result.scalars().all()
     
-    async def get_all_pending_books(
-        self,
-        db: AsyncSession
-    ) -> List[Book]:
-        """전체 미완료 책자 조회 (관리자용)"""
+    async def get_all_pending_books(self, db: AsyncSession) -> List[Book]:
+        """제작/배송 대기 중인 책자 목록 (관리자용)"""
         result = await db.execute(
             select(Book)
             .where(
@@ -84,11 +82,12 @@ class BookCRUD(BaseCRUD[Book, BookCreate, dict]):
                 )
             )
             .options(
-                joinedload(Book.issue).joinedload(Issue.group).joinedload(Issue.group.recipient)
+                joinedload(Book.issue).joinedload(Issue.group),
+                joinedload(Book.issue).joinedload(Issue.group).joinedload(FamilyGroup.recipient)  # 수정된 부분
             )
-            .order_by(Book.created_at.desc())
+            .order_by(desc(Book.created_at))
         )
-        return result.scalars().all()
+        return result.scalars().unique().all()
     
     async def update_production_status(
         self,
@@ -107,6 +106,17 @@ class BookCRUD(BaseCRUD[Book, BookCreate, dict]):
                 book.produced_at = datetime.now()
             # Transaction management moved to upper layer
         return book
+    
+    async def get_with_issue(self, db: AsyncSession, book_id: str) -> Optional[Book]:
+        """책자를 회차 정보와 함께 조회"""
+        result = await db.execute(
+            select(Book)
+            .where(Book.id == book_id)
+            .options(
+                joinedload(Book.issue).joinedload(Issue.posts)
+            )
+        )
+        return result.scalars().first()
 
 # 싱글톤 인스턴스
 book_crud = BookCRUD(Book)
