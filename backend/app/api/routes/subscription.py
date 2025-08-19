@@ -1,5 +1,4 @@
 from typing import List
-
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,9 +46,9 @@ async def ready_payment(
             detail="그룹 리더만 구독을 생성할 수 있습니다"
         )
 
-    # 3. 기존 활성 구독 확인
-    existing_subscription = await subscription_crud.get_by_group_id(db, membership.group_id)
-    if existing_subscription and str(existing_subscription.status).upper() in ("ACTIVE", "SubscriptionStatus.ACTIVE"):
+    # 3. 기존 활성 구독 확인 - 개선된 메서드 사용
+    existing_subscription = await subscription_crud.get_by_group_id_simple(db, membership.group_id)
+    if existing_subscription:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="이미 활성 구독이 존재합니다"
@@ -141,9 +140,13 @@ async def fail_payment():
 async def get_my_subscriptions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    status_filter: str | None = Query(None, description="all이면 전체, 기본(None/빈문자)은 활성만"),
-    ):
-
+    status_filter: str | None = Query(None, description="all이면 전체, 기본(None)은 활성만"),
+):
+    """
+    내 구독 목록 조회
+    - 기본: 활성만
+    - status_filter=all: 전체(취소/만료 포함)
+    """
     # 파라미터 정규화
     normalized = (status_filter or "").strip().lower()
     all_subs = await subscription_crud.get_by_user_id(db, current_user.id)
@@ -151,7 +154,8 @@ async def get_my_subscriptions(
     if normalized == "all":
         target = all_subs
     else:
-        target = [sub for sub in all_subs if str(sub.status).lower() == "active"]
+        # 🔥 핵심 수정: Enum 객체와 직접 비교
+        target = [sub for sub in all_subs if sub.status == SubscriptionStatus.ACTIVE]
 
     return [
         SubscriptionResponse(
@@ -230,7 +234,7 @@ async def cancel_subscription(
         )
 
     # 이미 취소된 구독
-    if str(subscription.status).upper() in ("CANCELLED", "SubscriptionStatus.CANCELLED"):
+    if subscription.status == SubscriptionStatus.CANCELLED:
         return {
             "message": "이미 취소된 구독입니다",
             "cancelled_at": subscription.end_date,
