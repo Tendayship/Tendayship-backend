@@ -3,6 +3,7 @@ from typing import Dict, Any
 from decimal import Decimal
 from datetime import datetime
 import httpx
+import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import settings
@@ -41,13 +42,18 @@ class KakaoPayService:
         group_id: str,
         amount: Decimal = Decimal("6900")
     ) -> Dict[str, Any]:
-
         try:
-            # 주문 ID 생성
             partner_order_id = f"FNS_{group_id[:8]}_{int(datetime.now().timestamp())}"
             partner_user_id = str(user_id)
-            
             headers = self._get_headers()
+            
+
+            temp_payment_id = str(uuid.uuid4())
+            
+
+            approval_url_with_id = f"{settings.PAYMENT_SUCCESS_URL}?temp_id={temp_payment_id}"
+            cancel_url_with_id = f"{settings.PAYMENT_CANCEL_URL}?temp_id={temp_payment_id}"
+            fail_url_with_id = f"{settings.PAYMENT_FAIL_URL}?temp_id={temp_payment_id}"
             
             payload = {
                 "cid": self.cid,
@@ -57,9 +63,9 @@ class KakaoPayService:
                 "quantity": 1,
                 "total_amount": int(amount),
                 "tax_free_amount": 0,
-                "approval_url": settings.PAYMENT_SUCCESS_URL,
-                "cancel_url": settings.PAYMENT_CANCEL_URL,
-                "fail_url": settings.PAYMENT_FAIL_URL,
+                "approval_url": approval_url_with_id,    
+                "cancel_url": cancel_url_with_id,        
+                "fail_url": fail_url_with_id,           
             }
             
             url = f"{self.api_host}/online/v1/payment/ready"
@@ -176,7 +182,7 @@ class KakaoPayService:
                         "amount": result.get("amount"),
                         "subscription_id": str(subscription.id),
                         "payment_id": str(payment.id),
-                        "user_id": payment_info["user_id"],  # 사용자 ID 추가
+                        "user_id": payment_info["user_id"],
                         "approved_at": result.get("approved_at")
                     }
 

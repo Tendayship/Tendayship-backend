@@ -81,22 +81,31 @@ async def ready_payment(
 @router.get("/approve")
 async def approve_payment(
     pg_token: str,
-    tid: str = Query(..., description="결제 고유번호"),
+    temp_id: str = Query(..., description="임시 결제 ID"), 
     db: AsyncSession = Depends(get_db)
 ):
     """
     결제 승인 - 카카오페이에서 리다이렉트 후 처리
-    JWT 인증 없이 tid를 통해 결제 정보 검증
+    temp_id를 통해 실제 tid 조회 후 결제 승인 처리
     """
     try:
-        # tid를 통해 결제 정보 검증 (JWT 토큰 불필요)
+
+        payment_info = payment_service._payment_cache.get(temp_id)
+        if not payment_info:
+            raise Exception(f"결제 정보를 찾을 수 없습니다: temp_id={temp_id}")
+        
+        actual_tid = payment_info.get("tid")
+        if not actual_tid:
+            raise Exception("결제 TID를 찾을 수 없습니다")
+
+
         approval_result = await payment_service.approve_payment(
-            tid=tid,
+            tid=actual_tid,
             pg_token=pg_token,
             db=db
         )
 
-        # 프론트엔드 성공 페이지로 리다이렉트
+
         frontend_url = f"{settings.FRONTEND_URL}/subscription/success"
         return RedirectResponse(
             url=f"{frontend_url}?subscription_id={approval_result['subscription_id']}&user_id={approval_result.get('user_id', '')}"
@@ -108,16 +117,50 @@ async def approve_payment(
         return RedirectResponse(url=f"{frontend_url}?error={str(e)}")
 
 @router.get("/cancel")
-async def cancel_payment():
+async def cancel_payment(
+    temp_id: str = Query(None, description="임시 결제 ID"), 
+    db: AsyncSession = Depends(get_db)
+):
     """결제 취소 - 사용자가 결제창에서 취소"""
+    
+
+    if temp_id and temp_id in payment_service._payment_cache:
+        payment_info = payment_service._payment_cache[temp_id]
+        logger.info(f"결제 취소됨: temp_id={temp_id}, order_id={payment_info.get('partner_order_id', 'N/A')}")
+        
+
+        del payment_service._payment_cache[temp_id]
+        
+
+        if payment_info.get('tid') and payment_info['tid'] in payment_service._payment_cache:
+            del payment_service._payment_cache[payment_info['tid']]
+    
     frontend_url = f"{settings.FRONTEND_URL}/subscription/cancel"
-    return RedirectResponse(url=frontend_url)
+    return RedirectResponse(url=f"{frontend_url}?temp_id={temp_id or ''}")
 
 @router.get("/fail")
-async def fail_payment():
+async def fail_payment(
+    temp_id: str = Query(None, description="임시 결제 ID"), 
+    db: AsyncSession = Depends(get_db)
+):
     """결제 실패"""
+    
+
+    if temp_id and temp_id in payment_service._payment_cache:
+        payment_info = payment_service._payment_cache[temp_id]
+        logger.error(f"결제 실패됨: temp_id={temp_id}, order_id={payment_info.get('partner_order_id', 'N/A')}")
+        
+
+        del payment_service._payment_cache[temp_id]
+        
+
+        if payment_info.get('tid') and payment_info['tid'] in payment_service._payment_cache:
+            del payment_service._payment_cache[payment_info['tid']]
+    
     frontend_url = f"{settings.FRONTEND_URL}/subscription/fail"
-    return RedirectResponse(url=frontend_url)
+    return RedirectResponse(url=f"{frontend_url}?temp_id={temp_id or ''}")
+
+
 
 # ===== 기존 구독 관리 API =====
 
