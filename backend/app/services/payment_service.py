@@ -129,7 +129,7 @@ class KakaoPayService:
                 raise ValueError(f"결제 정보를 찾을 수 없습니다: tid={tid}")
 
             # 0) 승인 호출 전, 중복 활성 구독 재확인(사전 차단)
-            existing_subscription = await subscription_crud.get_by_group_id(db, payment_info["group_id"])
+            existing_subscription = await subscription_crud.get_by_group_id_simple(db, payment_info["group_id"])
             if existing_subscription:
                 # 승인 API를 호출하지 않고 바로 실패 처리
                 if tid in self._payment_cache:
@@ -175,7 +175,7 @@ class KakaoPayService:
                         raise Exception("이미 활성 구독이 존재합니다. 결제가 원복되었습니다.")
 
                     # 3) 신규 구독/결제 저장
-                    subscription = await subscription_crud.create_subscription(
+                    subscription = await subscription_crud.upsert_activate_subscription(
                         db=db,
                         group_id=payment_info["group_id"],
                         user_id=payment_info["user_id"],

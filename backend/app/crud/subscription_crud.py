@@ -9,14 +9,32 @@ from .base import BaseCRUD
 from ..models.subscription import Subscription, Payment, SubscriptionStatus, PaymentStatus
 from ..schemas.subscription import SubscriptionCreate
 
+
 class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
     
+    async def get_by_group_id_simple(
+        self,
+        db: AsyncSession,
+        group_id: str
+    ) -> Optional[Subscription]:
+        """그룹의 활성 구독 존재 여부만 가볍게 확인 (Join/옵션 없음)"""
+        result = await db.execute(
+            select(Subscription)
+            .where(
+                and_(
+                    Subscription.group_id == group_id,
+                    Subscription.status == SubscriptionStatus.ACTIVE
+                )
+            )
+        )
+        return result.scalars().first()
+
     async def get_by_group_id(
         self,
         db: AsyncSession,
         group_id: str
     ) -> Optional[Subscription]:
-        """그룹의 활성 구독 조회"""
+        """그룹의 활성 구독 조회 (상세 정보 포함)"""
         result = await db.execute(
             select(Subscription)
             .where(
@@ -32,7 +50,20 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
             )
         )
         return result.scalars().first()
-    
+
+    async def get_any_by_group_id(
+        self,
+        db: AsyncSession,
+        group_id: str
+    ) -> Optional[Subscription]:
+        """그룹의 구독 조회 (상태 무관)"""
+        result = await db.execute(
+            select(Subscription)
+            .where(Subscription.group_id == group_id)
+            .order_by(desc(Subscription.created_at))
+        )
+        return result.scalars().first()
+
     async def get_by_user_id(
         self,
         db: AsyncSession,
@@ -49,7 +80,7 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
             .order_by(desc(Subscription.created_at))
         )
         return result.scalars().all()
-    
+
     async def get_expiring_subscriptions(
         self,
         db: AsyncSession,
@@ -57,7 +88,6 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
     ) -> List[Subscription]:
         """곧 만료될 구독 조회 (자동 결제용)"""
         target_date = date.today() + timedelta(days=days_ahead)
-        
         result = await db.execute(
             select(Subscription)
             .where(
@@ -72,7 +102,7 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
             )
         )
         return result.scalars().all()
-    
+
     async def get_failed_payments(
         self,
         db: AsyncSession,
@@ -97,7 +127,48 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
             )
         )
         return result.scalars().all()
-    
+
+    async def upsert_activate_subscription(
+        self,
+        db: AsyncSession,
+        group_id: str,
+        user_id: str,
+        amount: Decimal = Decimal("6900")
+    ) -> Subscription:
+        """
+        구독 생성 또는 재활성화
+        - 기존 구독이 있으면 재활성화 (UPDATE)
+        - 없으면 새로 생성 (INSERT)
+        """
+        # 1. 기존 구독 조회 (상태 무관)
+        existing = await self.get_any_by_group_id(db, group_id)
+        
+        if existing:
+            # 2. 기존 구독이 있으면 재활성화
+            existing.user_id = user_id  # 결제자 변경 가능
+            existing.status = SubscriptionStatus.ACTIVE
+            existing.start_date = date.today()
+            existing.end_date = None
+            existing.next_billing_date = date.today() + timedelta(days=30)
+            existing.amount = amount
+            existing.payment_method = "kakao_pay"
+            existing.cancel_reason = None
+            return existing
+        else:
+            # 3. 새로운 구독 생성
+            next_billing_date = date.today() + timedelta(days=30)
+            subscription = Subscription(
+                group_id=group_id,
+                user_id=user_id,
+                status=SubscriptionStatus.ACTIVE,
+                start_date=date.today(),
+                next_billing_date=next_billing_date,
+                amount=amount,
+                payment_method="kakao_pay"
+            )
+            db.add(subscription)
+            return subscription
+
     async def create_subscription(
         self,
         db: AsyncSession,
@@ -105,28 +176,12 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
         user_id: str,
         amount: Decimal = Decimal("6900")
     ) -> Subscription:
-        """새 구독 생성"""
-        # 기존 활성 구독 확인
-        existing = await self.get_by_group_id(db, group_id)
-        if existing:
-            raise ValueError("이미 활성 구독이 존재합니다")
-        
-        next_billing_date = date.today() + timedelta(days=30)
-        
-        subscription = Subscription(
-            group_id=group_id,
-            user_id=user_id,
-            status=SubscriptionStatus.ACTIVE,
-            start_date=date.today(),
-            next_billing_date=next_billing_date,
-            amount=amount,
-            payment_method="kakao_pay"
-        )
-        
-        db.add(subscription)
-        # Transaction management moved to upper layer
-        return subscription
-    
+        """
+        새 구독 생성 (기존 방식 - 하위 호환성)
+        실제로는 upsert_activate_subscription을 호출
+        """
+        return await self.upsert_activate_subscription(db, group_id, user_id, amount)
+
     async def cancel_subscription(
         self,
         db: AsyncSession,
@@ -142,8 +197,8 @@ class SubscriptionCRUD(BaseCRUD[Subscription, SubscriptionCreate, dict]):
         subscription.end_date = date.today()
         subscription.cancel_reason = reason
         
-        # Transaction management moved to upper layer
         return subscription
+
 
 class PaymentCRUD(BaseCRUD[Payment, dict, dict]):
     
@@ -170,7 +225,7 @@ class PaymentCRUD(BaseCRUD[Payment, dict, dict]):
         
         db.add(payment)
         return payment
-    
+
     async def get_by_subscription(
         self,
         db: AsyncSession,
@@ -185,7 +240,7 @@ class PaymentCRUD(BaseCRUD[Payment, dict, dict]):
             .limit(limit)
         )
         return result.scalars().all()
-    
+
     async def get_recent_payment(
         self,
         db: AsyncSession,
@@ -200,6 +255,7 @@ class PaymentCRUD(BaseCRUD[Payment, dict, dict]):
         )
         return result.scalars().first()
 
-# 싱글톤 인스턴스  
+
+# 싱글톤 인스턴스
 subscription_crud = SubscriptionCRUD(Subscription)
 payment_crud = PaymentCRUD(Payment)
