@@ -13,11 +13,8 @@ from ...crud.subscription_crud import subscription_crud, payment_crud
 from ...crud.member_crud import family_member_crud
 from ...services.payment_service import payment_service
 from ...schemas.subscription import (
-    SubscriptionCreate, 
     SubscriptionResponse, 
-    PaymentResponse,
-    PaymentReadyResponse,  # 새로 추가
-    PaymentApproveRequest   # 새로 추가
+    PaymentReadyResponse
 )
 from ...core.constants import ROLE_LEADER
 
@@ -81,94 +78,50 @@ async def ready_payment(
 @router.get("/approve")
 async def approve_payment(
     pg_token: str,
-    temp_id: str = Query(..., description="임시 결제 ID"),
+    tid: str = Query(..., description="결제 고유번호"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """결제 승인 - temp_id를 통해 실제 tid 조회 후 결제 승인 처리"""
+    """
+    결제 승인 - 카카오페이에서 리다이렉트 후 처리
+    
+    1. pg_token과 tid로 결제 승인
+    2. 구독 정보 DB 저장
+    3. 결제 내역 DB 저장
+    4. 성공 페이지로 리다이렉트
+    """
+    
     try:
-        # temp_id로 결제 정보 조회
-        payment_info = payment_service._payment_cache.get(temp_id)
-        if not payment_info:
-            raise Exception(f"결제 정보를 찾을 수 없습니다: temp_id={temp_id}")
-        
-        actual_tid = payment_info.get("tid")
-        if not actual_tid:
-            raise Exception("결제 TID를 찾을 수 없습니다")
-
-        # 실제 tid로 결제 승인 처리
+        # 결제 승인 처리
         approval_result = await payment_service.approve_payment(
-            tid=actual_tid,
+            tid=tid,
             pg_token=pg_token,
             db=db
         )
-
-        # 성공 시 캐시 정리
-        if temp_id in payment_service._payment_cache:
-            del payment_service._payment_cache[temp_id]
-        if actual_tid in payment_service._payment_cache:
-            del payment_service._payment_cache[actual_tid]
-
+        
         # 프론트엔드 성공 페이지로 리다이렉트
         frontend_url = f"{settings.FRONTEND_URL}/subscription/success"
         return RedirectResponse(
-            url=f"{frontend_url}?subscription_id={approval_result['subscription_id']}&user_id={approval_result.get('user_id', '')}"
+            url=f"{frontend_url}?subscription_id={approval_result['subscription_id']}"
         )
-
+        
     except Exception as e:
         logger.error(f"결제 승인 실패: {str(e)}")
-        
-        # 실패 시에도 캐시 정리
-        if temp_id in payment_service._payment_cache:
-            del payment_service._payment_cache[temp_id]
-        
+        # 실패 페이지로 리다이렉트
         frontend_url = f"{settings.FRONTEND_URL}/subscription/fail"
         return RedirectResponse(url=f"{frontend_url}?error={str(e)}")
 
 @router.get("/cancel")
-async def cancel_payment(
-    temp_id: str = Query(None, description="임시 결제 ID"), 
-    db: AsyncSession = Depends(get_db)
-):
+async def cancel_payment():
     """결제 취소 - 사용자가 결제창에서 취소"""
-    
-
-    if temp_id and temp_id in payment_service._payment_cache:
-        payment_info = payment_service._payment_cache[temp_id]
-        logger.info(f"결제 취소됨: temp_id={temp_id}, order_id={payment_info.get('partner_order_id', 'N/A')}")
-        
-
-        del payment_service._payment_cache[temp_id]
-        
-
-        if payment_info.get('tid') and payment_info['tid'] in payment_service._payment_cache:
-            del payment_service._payment_cache[payment_info['tid']]
-    
     frontend_url = f"{settings.FRONTEND_URL}/subscription/cancel"
-    return RedirectResponse(url=f"{frontend_url}?temp_id={temp_id or ''}")
+    return RedirectResponse(url=frontend_url)
 
 @router.get("/fail")
-async def fail_payment(
-    temp_id: str = Query(None, description="임시 결제 ID"), 
-    db: AsyncSession = Depends(get_db)
-):
+async def fail_payment():
     """결제 실패"""
-    
-
-    if temp_id and temp_id in payment_service._payment_cache:
-        payment_info = payment_service._payment_cache[temp_id]
-        logger.error(f"결제 실패됨: temp_id={temp_id}, order_id={payment_info.get('partner_order_id', 'N/A')}")
-        
-
-        del payment_service._payment_cache[temp_id]
-        
-
-        if payment_info.get('tid') and payment_info['tid'] in payment_service._payment_cache:
-            del payment_service._payment_cache[payment_info['tid']]
-    
     frontend_url = f"{settings.FRONTEND_URL}/subscription/fail"
-    return RedirectResponse(url=f"{frontend_url}?temp_id={temp_id or ''}")
-
-
+    return RedirectResponse(url=frontend_url)
 
 # ===== 기존 구독 관리 API =====
 
@@ -179,7 +132,23 @@ async def get_my_subscriptions(
 ):
     """내 구독 목록 조회"""
     subscriptions = await subscription_crud.get_by_user_id(db, current_user.id)
-    return subscriptions
+    
+    # 명시적으로 SubscriptionResponse 객체로 변환
+    return [
+        SubscriptionResponse(
+            id=str(sub.id),
+            group_id=str(sub.group_id),
+            user_id=str(sub.user_id),
+            status=sub.status,
+            start_date=sub.start_date,
+            end_date=sub.end_date,
+            next_billing_date=sub.next_billing_date,
+            amount=sub.amount,
+            created_at=sub.created_at,
+            updated_at=sub.updated_at
+        )
+        for sub in subscriptions
+    ]
 
 @router.get("/{subscription_id}", response_model=SubscriptionResponse)
 async def get_subscription_detail(

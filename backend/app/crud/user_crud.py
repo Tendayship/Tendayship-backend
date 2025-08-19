@@ -25,23 +25,25 @@ class UserCRUD(BaseCRUD[User, UserCreate, UserUpdate]):
         return result.scalars().first()
     
     async def update_profile(
-        self, 
-        db: AsyncSession, 
-        user_id: UUID, 
+        self,
+        db: AsyncSession,
+        user_id: UUID,
         profile_data: UserProfileUpdate
     ) -> User:
         """사용자 프로필 정보 업데이트"""
         user = await self.get_by_id(db, user_id)
         if not user:
             raise ValueError("사용자를 찾을 수 없습니다")
-        
-        # 업데이트할 필드만 수정
+
         update_data = profile_data.dict(exclude_unset=True)
         for field, value in update_data.items():
             setattr(user, field, value)
+
+        await db.commit()
+        await db.refresh(user)
         
-        # Transaction management moved to upper layer
         return user
+
     
     async def deactivate_user(self, db: AsyncSession, user_id: UUID) -> bool:
         """사용자 비활성화 (소프트 삭제)"""

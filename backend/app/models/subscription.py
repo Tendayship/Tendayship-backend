@@ -3,11 +3,42 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 import enum
+from sqlalchemy.types import TypeDecorator, CHAR
+import uuid
 
 from .base import Base, TimestampMixin, UUIDMixin
 from .user import User
 
+class GUID(TypeDecorator):
+    """플랫폼 독립적인 GUID 타입."""
+    impl = CHAR
+    cache_ok = True
 
+    def load_dialect_impl(self, dialect):
+        if dialect.name == 'postgresql':
+            return dialect.type_descriptor(UUID())
+        else:
+            return dialect.type_descriptor(CHAR(32))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        elif dialect.name == 'postgresql':
+            return str(value)
+        else:
+            if not isinstance(value, uuid.UUID):
+                return str(uuid.UUID(value))
+            else:
+                return str(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        else:
+            if not isinstance(value, uuid.UUID):
+                return uuid.UUID(value)
+            return value
+        
 class SubscriptionStatus(enum.Enum):
     """구독 상태"""
     ACTIVE = "active"      # 활성

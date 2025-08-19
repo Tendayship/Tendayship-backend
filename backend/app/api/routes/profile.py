@@ -24,18 +24,23 @@ async def update_my_profile(
     db: AsyncSession = Depends(get_db)
 ):
     """사용자 프로필 수정"""
-    
     try:
         updated_user = await user_crud.update(
             db, db_obj=current_user, obj_in=profile_data
         )
+        
+        await db.commit()
+        await db.refresh(updated_user)
+        
         return updated_user
         
     except Exception as e:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"프로필 수정 중 오류: {str(e)}"
         )
+
 
 @router.post("/me/avatar")
 async def upload_profile_image(

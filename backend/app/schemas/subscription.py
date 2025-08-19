@@ -1,8 +1,8 @@
-from typing import Optional
+from typing import Optional, Any
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Field, field_serializer, ConfigDict
 from enum import Enum
 
 
@@ -31,6 +31,8 @@ class SubscriptionCreate(BaseModel):
 
 # 구독 응답
 class SubscriptionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    
     id: str
     group_id: str
     user_id: str
@@ -41,13 +43,13 @@ class SubscriptionResponse(BaseModel):
     amount: Decimal
     created_at: datetime
     updated_at: datetime
-    
+
     @field_serializer('id', 'group_id', 'user_id')
-    def serialize_uuid_fields(self, value: UUID) -> str:
-        return str(value)
-    
-    class Config:
-        from_attributes = True
+    def serialize_uuid_fields(self, value: Any) -> str:
+        """UUID 객체를 문자열로 변환"""
+        if isinstance(value, UUID):
+            return str(value)
+        return str(value) if value else ""
 
 # 결제 요청
 class PaymentRequest(BaseModel):
