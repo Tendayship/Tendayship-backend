@@ -219,7 +219,6 @@ class KakaoPayService:
         """결제 취소"""
         try:
             headers = self._get_headers()
-            
             payload = {
                 "cid": self.cid,
                 "tid": tid,
@@ -227,21 +226,33 @@ class KakaoPayService:
                 "cancel_tax_free_amount": 0,
                 "cancel_reason": cancel_reason
             }
-            
+
+
+            logger.info(f"카카오페이 취소 요청: tid={tid}, amount={cancel_amount}, cid={self.cid}")
+
             url = f"{self.api_host}/online/v1/payment/cancel"
-            
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(url, headers=headers, json=payload)
-                
+
                 if response.status_code != 200:
-                    error_data = response.json() if response.text else {}
-                    raise Exception(f"결제 취소 실패: {error_data.get('msg', '알 수 없는 오류')}")
-                
+                    try:
+                        error_data = response.json()
+                        error_code = error_data.get('error_code', 'UNKNOWN')
+                        error_message = error_data.get('error_message', error_data.get('msg', '알 수 없는 오류'))
+                        
+                        logger.error(f"카카오페이 취소 실패: code={error_code}, message={error_message}")
+                        logger.error(f"요청 파라미터: {payload}")
+                        
+                        raise Exception(f"결제 취소 실패 ({error_code}): {error_message}")
+                    except Exception as parse_error:
+                        error_text = response.text
+                        logger.error(f"카카오페이 응답 파싱 실패: {str(parse_error)}, response_text={error_text}")
+                        raise Exception(f"결제 취소 실패: HTTP {response.status_code} - {error_text}")
+
                 result = response.json()
                 logger.info(f"결제 취소 성공: tid={tid}")
-                
                 return result
-                
+
         except Exception as e:
             logger.error(f"결제 취소 중 오류: {str(e)}")
             raise
