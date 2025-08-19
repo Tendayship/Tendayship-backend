@@ -5,8 +5,8 @@ from sqlalchemy.orm import joinedload
 
 from .base import BaseCRUD
 from ..models.post import Post
-from ..models.user import User
 from ..schemas.post import PostCreate, PostUpdate
+from ..models.issue import Issue
 
 class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
 
@@ -91,11 +91,43 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
         skip: int = 0,
         limit: int = 20
     ) -> List[Post]:
-        """그룹의 여러 회차 소식 조회"""
+        """그룹의 여러 회차 소식 조회 - 보안 검증 포함"""
         try:
+            # 1. issue_ids가 해당 group_id에 속하는지 검증
+            if issue_ids:
+                verification_result = await db.execute(
+                    select(Issue.id)
+                    .where(
+                        and_(
+                            Issue.id.in_(issue_ids),
+                            Issue.group_id == group_id
+                        )
+                    )
+                )
+                verified_issue_ids = [str(issue_id) for issue_id in verification_result.scalars().all()]
+                
+                # 검증 실패 시 빈 리스트 반환
+                if not verified_issue_ids:
+                    return []
+                
+                # 검증된 issue_ids만 사용
+                final_issue_ids = verified_issue_ids
+            else:
+                # issue_ids가 비어있으면 해당 그룹의 모든 이슈 조회
+                group_issues_result = await db.execute(
+                    select(Issue.id)
+                    .where(Issue.group_id == group_id)
+                    .order_by(desc(Issue.created_at))
+                )
+                final_issue_ids = [str(issue_id) for issue_id in group_issues_result.scalars().all()]
+                
+                if not final_issue_ids:
+                    return []
+
+            # 2. 검증된 issue_ids로 포스트 조회
             result = await db.execute(
                 select(Post)
-                .where(Post.issue_id.in_(issue_ids))
+                .where(Post.issue_id.in_(final_issue_ids))
                 .options(joinedload(Post.author))
                 .order_by(desc(Post.created_at))
                 .offset(skip)
@@ -104,6 +136,7 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
             return result.scalars().unique().all()
             
         except Exception as e:
+            logger.error(f"get_posts_by_group 오류: {str(e)}")
             return []
 
     async def get_user_posts_in_issue(
@@ -136,5 +169,18 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
             await db.delete(post)
             await db.commit()
             return True
+    
+    async def get_posts_by_issue_with_author(self, db: AsyncSession, issue_id: str, limit: int = 20, offset: int = 0):
+        """이슈의 포스트를 작성자 정보와 함께 조회 (관리자용 피드에서 사용)"""
+        result = await db.execute(
+            select(Post)
+            .where(Post.issue_id == issue_id)
+            .options(joinedload(Post.author))
+            .order_by(Post.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return result.scalars().all()
+
 # 싱글톤 인스턴스
 post_crud = PostCRUD(Post)

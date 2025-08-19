@@ -13,38 +13,28 @@ from ..models.post import Post
 from ..schemas.family import FamilyGroupCreate
 from ..core.constants import GROUP_STATUS_ACTIVE
 
-class FamilyGroupCRUD(BaseCRUD[FamilyGroup, dict, dict]):
-    
+class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
+
     async def create_with_leader(
-        self, 
-        db: AsyncSession, 
-        group_data: dict, 
+        self,
+        db: AsyncSession,
+        group_data: FamilyGroupCreate,
         leader_id: str
-    ) -> FamilyGroup: 
+    ) -> FamilyGroup:
         """리더와 함께 가족 그룹 생성"""
-        
-        # 초대 코드 생성
         invite_code = self._generate_invite_code()
         
-        # 가족 그룹 생성
         db_group = FamilyGroup(
-            group_name=group_data["group_name"],
+            group_name=group_data.group_name,
             leader_id=leader_id,
             invite_code=invite_code,
-            deadline_type=group_data["deadline_type"],
+            deadline_type=group_data.deadline_type,
             status=GROUP_STATUS_ACTIVE
         )
-        
         db.add(db_group)
-        # Transaction management moved to upper layer
-        return db_group 
-    
-    async def get_by_invite_code(
-        self, 
-        db: AsyncSession, 
-        invite_code: str
-    ) -> Optional[FamilyGroup]:
-        """초대 코드로 활성 그룹 조회"""
+        return db_group
+
+    async def get_by_invite_code(self, db: AsyncSession, invite_code: str) -> Optional[FamilyGroup]:
         result = await db.execute(
             select(FamilyGroup)
             .where(
@@ -56,13 +46,8 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, dict, dict]):
             .options(selectinload(FamilyGroup.recipient))
         )
         return result.scalars().first()
-    
-    async def get_by_user_id(
-        self, 
-        db: AsyncSession, 
-        user_id: str
-    ) -> Optional[FamilyGroup]:
-        """사용자가 속한 그룹 조회"""
+
+    async def get_by_user_id(self, db: AsyncSession, user_id: str) -> Optional[FamilyGroup]:
         result = await db.execute(
             select(FamilyGroup)
             .join(FamilyMember)
@@ -73,16 +58,21 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, dict, dict]):
             )
         )
         return result.scalars().first()
-    
-    async def get_all_groups_with_stats(
-        self,
-        db: AsyncSession,
-        skip: int = 0,
-        limit: int = 20
-    ) -> List[dict]:
-        """모든 가족 그룹을 통계 정보와 함께 조회 (N+1 최적화)"""
-        
-        # 1. 기본 그룹 정보 조회 (joinedload 사용)
+
+    async def get_with_relations(self, db: AsyncSession, group_id: str) -> Optional[FamilyGroup]:
+        """관계를 포함한 그룹 조회 (관리자용 피드에서 사용)"""
+        result = await db.execute(
+            select(FamilyGroup)
+            .where(FamilyGroup.id == group_id)
+            .options(
+                joinedload(FamilyGroup.recipient),
+                joinedload(FamilyGroup.leader),
+                selectinload(FamilyGroup.members)
+            )
+        )
+        return result.scalars().first()
+
+    async def get_all_groups_with_stats(self, db: AsyncSession, skip: int = 0, limit: int = 20) -> List[dict]:
         groups_query = (
             select(FamilyGroup)
             .options(
@@ -93,16 +83,15 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, dict, dict]):
             .offset(skip)
             .limit(limit)
         )
-        
+
         result = await db.execute(groups_query)
         groups = result.scalars().unique().all()
-        
+
         if not groups:
             return []
-        
+
         group_ids = [str(group.id) for group in groups]
-        
-        # 2. 현재 활성 회차 조회 (한 번의 쿼리로 모든 그룹)
+
         current_issues_query = (
             select(Issue)
             .where(
@@ -114,8 +103,7 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, dict, dict]):
         )
         current_issues_result = await db.execute(current_issues_query)
         current_issues = {str(issue.group_id): issue for issue in current_issues_result.scalars().all()}
-        
-        # 3. 회차별 포스트 수 집계 (현재 활성 회차만)
+
         issue_ids = [issue.id for issue in current_issues.values()]
         posts_count = {}
         if issue_ids:
@@ -129,8 +117,7 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, dict, dict]):
             )
             posts_count_result = await db.execute(posts_count_query)
             posts_count = {str(row.issue_id): row.post_count for row in posts_count_result.fetchall()}
-        
-        # 4. 그룹별 미완료 책자 수 집계 (한 번의 쿼리로 모든 그룹)
+
         pending_books_query = (
             select(
                 Issue.group_id,
@@ -147,10 +134,10 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, dict, dict]):
             )
             .group_by(Issue.group_id)
         )
+
         pending_books_result = await db.execute(pending_books_query)
         pending_books_count = {str(row.group_id): row.pending_books_count for row in pending_books_result.fetchall()}
-        
-        # 5. 결과 조합
+
         groups_data = []
         for group in groups:
             group_id_str = str(group.id)
@@ -158,7 +145,7 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, dict, dict]):
             current_issue_posts = 0
             if current_issue:
                 current_issue_posts = posts_count.get(str(current_issue.id), 0)
-            
+
             groups_data.append({
                 "id": group.id,
                 "group_name": group.group_name,
@@ -171,13 +158,10 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, dict, dict]):
                 "created_at": group.created_at,
                 "status": group.status
             })
-        
+
         return groups_data
 
     def _generate_invite_code(self) -> str:
-        """8자리 초대 코드 생성 (대문자+숫자)"""
-        return ''.join(secrets.choice(string.ascii_uppercase + string.digits) 
-                      for _ in range(8))
+        return ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
 
-# 싱글톤 인스턴스
 family_group_crud = FamilyGroupCRUD(FamilyGroup)
