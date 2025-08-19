@@ -156,8 +156,9 @@ class KakaoPayService:
                 result = response.json()
                 aid = result.get("aid")
 
-                # 2. DB에 구독 및 결제 정보 저장 (트랜잭션 처리)
+  
                 try:
+                    # 구독 생성
                     subscription = await subscription_crud.create_subscription(
                         db=db,
                         group_id=payment_info["group_id"],
@@ -165,9 +166,14 @@ class KakaoPayService:
                         amount=payment_info["amount"]
                     )
 
+
+                    await db.flush()           # DB에 반영하여 ID 할당
+                    await db.refresh(subscription)  # 할당된 ID를 객체에 로드
+
+                    # 이제 subscription.id가 정상적으로 할당됨
                     payment = await payment_crud.create_payment(
                         db=db,
-                        subscription_id=subscription.id,
+                        subscription_id=subscription.id,  
                         transaction_id=aid,
                         amount=payment_info["amount"],
                         payment_method="kakao_pay",
@@ -203,7 +209,6 @@ class KakaoPayService:
             # 실패 시 캐시 정리
             if tid in self._payment_cache:
                 del self._payment_cache[tid]
-            raise
     
     async def cancel_payment(
         self,
