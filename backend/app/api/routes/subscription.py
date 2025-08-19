@@ -141,17 +141,30 @@ async def fail_payment():
 async def get_my_subscriptions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    status_filter: str | None = Query(None, description="all이면 전체, 기본(None)은 활성만"),
 ):
-    """내 구독 목록 조회"""
-    subscriptions = await subscription_crud.get_by_user_id(db, current_user.id)
+    """
+    내 구독 목록 조회
+    - 기본: 활성 구독만
+    - status_filter=all: 전체 구독(취소, 만료 포함)
+    """
+    all_subs = await subscription_crud.get_by_user_id(db, current_user.id)
 
-    # 명시적으로 SubscriptionResponse 객체로 변환 (UUID 직렬화 보장)
+    if status_filter == "all":
+        target = all_subs
+    else:
+        # 활성만 필터
+        target = [
+            sub for sub in all_subs
+            if str(sub.status).upper() in ("ACTIVE", "SubscriptionStatus.ACTIVE")
+        ]
+
     return [
         SubscriptionResponse(
             id=str(sub.id),
             group_id=str(sub.group_id),
             user_id=str(sub.user_id),
-            status=sub.status,  # Enum은 Pydantic에서 처리
+            status=sub.status,
             start_date=sub.start_date,
             end_date=sub.end_date,
             next_billing_date=sub.next_billing_date,
@@ -159,7 +172,7 @@ async def get_my_subscriptions(
             created_at=sub.created_at,
             updated_at=sub.updated_at,
         )
-        for sub in subscriptions
+        for sub in target
     ]
 
 @router.get("/{subscription_id}", response_model=SubscriptionResponse)

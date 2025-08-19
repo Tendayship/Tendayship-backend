@@ -122,8 +122,9 @@ class KakaoPayService:
         pg_token: str,
         db: AsyncSession
     ) -> Dict[str, Any]:
-        """결제 승인 - tid를 통한 안전한 검증"""
+        """결제 승인 - 중복 구독 방지(이미 활성 구독이 있으면 승인 후에도 구독/결제 저장하지 않음)"""
         try:
+            # 1) 캐시에서 ready 때 저장한 결제 정보 조회
             payment_info = self._payment_cache.get(tid)
             if not payment_info:
                 raise ValueError(f"결제 정보를 찾을 수 없습니다: tid={tid}")
@@ -137,6 +138,7 @@ class KakaoPayService:
                 "pg_token": pg_token,
             }
 
+            # 2) 카카오페이 승인 호출
             url = f"{self.api_host}/online/v1/payment/approve"
             async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.post(url, headers=headers, json=payload)
@@ -153,18 +155,32 @@ class KakaoPayService:
                 aid = result.get("aid")
 
                 try:
-                    # 구독 생성
+                    # 3) 승인 후에도 중복 활성 구독 존재 여부 재확인 (레이스 컨디션/중복 결제 방지)
+                    existing_subscription = await subscription_crud.get_by_group_id(
+                        db, payment_info["group_id"]
+                    )
+                    if existing_subscription:
+                        # 활성 구독 존재 시: 결제/구독 DB 기록을 만들지 않고, 명확한 예외로 종료
+                        logger.warning(
+                            f"이미 활성 구독이 존재하여 결제 저장 중단: group_id={payment_info['group_id']}, "
+                            f"existing_subscription_id={existing_subscription.id}"
+                        )
+                        # 캐시 정리
+                        if tid in self._payment_cache:
+                            del self._payment_cache[tid]
+                        raise Exception("이미 활성 구독이 존재합니다. 중복 구독은 허용되지 않습니다.")
+
+                    # 4) 신규 구독 생성
                     subscription = await subscription_crud.create_subscription(
                         db=db,
                         group_id=payment_info["group_id"],
                         user_id=payment_info["user_id"],
                         amount=payment_info["amount"],
                     )
-
                     await db.flush()
                     await db.refresh(subscription)
 
-                    # 결제 기록 생성
+                    # 5) 결제 기록 생성 (aid를 거래 ID로 저장)
                     payment = await payment_crud.create_payment(
                         db=db,
                         subscription_id=subscription.id,
@@ -174,9 +190,8 @@ class KakaoPayService:
                         status=PaymentStatus.SUCCESS,
                     )
 
+                    # 6) 커밋 및 캐시 정리
                     await db.commit()
-
-                    # 캐시 정리
                     if tid in self._payment_cache:
                         del self._payment_cache[tid]
 
@@ -193,8 +208,14 @@ class KakaoPayService:
                     }
 
                 except Exception as db_error:
+                    # UniqueViolation 등 DB 에러도 동일 메시지로 사용자에게 일관되게 전달
                     await db.rollback()
                     logger.error(f"DB 저장 실패: {str(db_error)}")
+                    # 캐시 정리
+                    if tid in self._payment_cache:
+                        del self._payment_cache[tid]
+                    if "unique" in str(db_error).lower() and "group_id" in str(db_error).lower():
+                        raise Exception("이미 활성 구독이 존재합니다. 중복 구독은 허용되지 않습니다.")
                     raise Exception(f"결제는 성공했으나 DB 저장 실패: {str(db_error)}")
 
         except Exception as e:
@@ -202,6 +223,7 @@ class KakaoPayService:
             if tid in self._payment_cache:
                 del self._payment_cache[tid]
             raise
+
 
     async def cancel_payment(
         self,
