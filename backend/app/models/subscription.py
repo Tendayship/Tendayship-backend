@@ -62,7 +62,7 @@ class Subscription(Base, UUIDMixin, TimestampMixin):
     amount = Column(Numeric(10, 0), nullable=False, comment="구독료 (원)")
     payment_method = Column(String(50), nullable=True, comment="결제 수단")
     pg_customer_key = Column(String(200), nullable=True, comment="PG사 고객 키")
-
+    history = relationship("SubscriptionHistory", back_populates="subscription", cascade="all, delete-orphan")
     group = relationship("FamilyGroup", back_populates="subscription")
     payer = relationship("User", back_populates="subscriptions")
     payments = relationship("Payment", back_populates="subscription", cascade="all, delete-orphan")
