@@ -13,7 +13,8 @@ MAX_POSTS_PER_ISSUE = 20
 # Admin configuration
 # TODO: Move to environment variables in production
 ADMIN_EMAILS = [
-    "admin@familynews.com"
+    "admin@familynews.com",
+    "kakao_4401480828@temp.kakao"
 ]
 
 # Status constants
