@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Family News Service"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
-    
+
     ADMIN_EMAILS: List[str] = Field(
         default=["admin@familynews.com"],
         description="관리자 이메일 목록"
@@ -249,6 +249,28 @@ class Settings(BaseSettings):
     def parse_allowed_hosts(cls, v):
         if isinstance(v, str):
             return [host.strip() for host in v.split(",")]
+        return v
+    
+    @validator("ADMIN_EMAILS", pre=True)
+    def parse_admin_emails(cls, v):
+        """쉼표로 구분된 관리자 이메일을 파싱"""
+        if isinstance(v, str):
+            return [email.strip() for email in v.split(",") if email.strip()]
+        return v
+
+    @validator("ADMIN_EMAILS")
+    def validate_admin_emails(cls, v):
+        """관리자 이메일 형식 검증"""
+        if not v or len(v) == 0:
+            raise ValueError("최소 하나의 관리자 이메일이 필요합니다")
+        
+        import re
+        email_pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+        
+        for email in v:
+            if not email_pattern.match(email):
+                raise ValueError(f"유효하지 않은 이메일 형식: {email}")
+        
         return v
 
 
