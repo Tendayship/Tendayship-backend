@@ -141,21 +141,17 @@ async def fail_payment():
 async def get_my_subscriptions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    status_filter: str | None = Query(None, description="all이면 전체, 기본(None)은 활성만"),
-):
-    """
-    내 구독 목록
-    - 기본: 활성만
-    - status_filter=all: 전체(취소/만료 포함)
-    """
+    status_filter: str | None = Query(None, description="all이면 전체, 기본(None/빈문자)은 활성만"),
+    ):
+
+    # 파라미터 정규화
+    normalized = (status_filter or "").strip().lower()
     all_subs = await subscription_crud.get_by_user_id(db, current_user.id)
-    if status_filter == "all":
+
+    if normalized == "all":
         target = all_subs
     else:
-        target = [
-            sub for sub in all_subs
-            if str(sub.status).lower() == "active"
-        ]
+        target = [sub for sub in all_subs if str(sub.status).lower() == "active"]
 
     return [
         SubscriptionResponse(
