@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
 from ...database.session import get_db
 from ...services.auth_service import kakao_oauth_service
-from ...schemas.user import SocialLogin, KakaoLoginResponse, UserProfileUpdate
+from ...schemas.user import SocialLogin, UserProfileUpdate
 from ...core.security import create_access_token
 from ...api.dependencies import get_current_user
 from ...models.user import User
@@ -21,13 +21,13 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 # 쿠키 설정 상수
 COOKIE_NAME = "access_token"
 
-def set_auth_cookie(response: JSONResponse, token: str):
+def set_auth_cookie(response, token: str):
     """JWT 토큰을 HttpOnly, Secure 쿠키로 설정"""
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=not settings.DEBUG,  # DEBUG=False(운영)이면 secure=True
+        secure=not settings.DEBUG,  # DEBUG 환경 기반 동적 설정
         samesite="Lax",
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
@@ -41,30 +41,22 @@ async def kakao_oauth_callback(
     error_description: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """카카오 OAuth 콜백 처리 - 쿠키 기반 JWT 설정"""
+    """카카오 OAuth 콜백 처리 - 프론트 콜백 페이지로 리다이렉트"""
     
     # 에러 처리
     if error:
         error_msg = error_description or error
         logger.error(f"OAuth error received: {error} - {error_description}")
-        return JSONResponse(
-            content={
-                "success": False,
-                "error": error,
-                "message": error_msg
-            },
-            status_code=400
+        return RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason={error}",
+            status_code=302
         )
     
     if not code:
         logger.error("No authorization code received")
-        return JSONResponse(
-            content={
-                "success": False,
-                "error": "no_code",
-                "message": "인증 코드가 없습니다."
-            },
-            status_code=400
+        return RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason=no_code",
+            status_code=302
         )
     
     try:
@@ -76,43 +68,27 @@ async def kakao_oauth_callback(
         
         if not await kakao_oauth_service.verify_kakao_account(kakao_user_info):
             logger.warning("Account verification failed")
-            return JSONResponse(
-                content={
-                    "success": False,
-                    "error": "invalid_account",
-                    "message": "유효하지 않은 카카오 계정입니다."
-                },
-                status_code=400
+            return RedirectResponse(
+                url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason=invalid_account",
+                status_code=302
             )
         
         user = await kakao_oauth_service.login_or_create_user(kakao_user_info, db)
         jwt_token = create_access_token(data={"sub": str(user.id)})
         
-        # 성공 응답 - JWT는 쿠키로 설정, JSON에는 사용자 정보만
-        response = JSONResponse(content={
-            "success": True,
-            "user": {
-                "id": str(user.id),
-                "name": user.name,
-                "email": user.email,
-                "profile_image_url": user.profile_image_url,
-                "is_new_user": user.created_at == user.updated_at
-            }
-        })
-        
-        # JWT 토큰을 HttpOnly 쿠키로 설정
+        # 성공 응답 - JWT는 쿠키로 설정, 프론트 성공 페이지로 리다이렉트
+        response = RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/auth/callback/success",
+            status_code=302
+        )
         set_auth_cookie(response, jwt_token)
         return response
         
     except Exception as e:
         logger.error(f"OAuth callback failed: {str(e)}", exc_info=True)
-        return JSONResponse(
-            content={
-                "success": False,
-                "error": "auth_failed",
-                "message": "인증 처리 중 오류가 발생했습니다."
-            },
-            status_code=500
+        return RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason=server_error",
+            status_code=302
         )
 
 @router.post("/kakao")
