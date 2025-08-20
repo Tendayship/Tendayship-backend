@@ -1,5 +1,6 @@
 from typing import Optional
-from fastapi import Depends, HTTPException, status
+
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from jose import JWTError
@@ -10,24 +11,37 @@ from ..core.security import verify_token
 from ..crud.user_crud import user_crud
 from ..models.user import User
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)  # auto_error=False로 설정
+
+# 쿠키 이름 상수
+COOKIE_NAME = "access_token"
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
+        detail="인증 정보가 없습니다",
         headers={"WWW-Authenticate": "Bearer"},
     )
     
+    # 1. 쿠키에서 토큰 우선 확인
+    token = request.cookies.get(COOKIE_NAME)
+    
+    # 2. 쿠키에 없으면 Authorization 헤더에서 확인 (fallback)
+    if not token and credentials and credentials.scheme.lower() == "bearer":
+        token = credentials.credentials
+    
+    if not token:
+        raise credentials_exception
+    
     try:
-        payload = verify_token(credentials.credentials)
+        payload = verify_token(token)
         user_id: str = payload.get("sub")
         if user_id is None:
             raise credentials_exception
-            
     except JWTError:
         raise credentials_exception
     except Exception:
@@ -36,25 +50,25 @@ async def get_current_user(
     user = await user_crud.get(db, id=user_id)
     if user is None:
         raise credentials_exception
-        
+    
     return user
 
 async def get_current_user_optional(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Optional[User]:
-    if credentials is None:
-        return None
     try:
-        return await get_current_user(credentials, db)
+        return await get_current_user(request, db, credentials)
     except HTTPException:
         return None
 
 async def require_auth(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> User:
-    return await get_current_user(credentials, db)
+    return await get_current_user(request, db, credentials)
 
 async def get_current_member(
     current_user: User = Depends(get_current_user),
@@ -66,4 +80,5 @@ async def get_current_member(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="가족 그룹에 속해있지 않습니다"
         )
+    
     return membership

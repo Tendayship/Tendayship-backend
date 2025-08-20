@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -10,96 +10,123 @@ from ...core.security import create_access_token
 from ...api.dependencies import get_current_user
 from ...models.user import User
 from ...crud.user_crud import user_crud
+from ...core.config import settings
+
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
+# 쿠키 설정 상수
+COOKIE_NAME = "access_token"
+
+def set_auth_cookie(response: JSONResponse, token: str):
+    """JWT 토큰을 HttpOnly, Secure 쿠키로 설정"""
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=True,  # HTTPS 환경에서만 전송
+        samesite="Lax",  # CSRF 방지, 필요 시 "None"으로 변경
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+        # domain=".yourdomain.com"  # 필요 시 도메인 설정
+    )
 
 @router.get("/kakao/callback")
 async def kakao_oauth_callback(
     code: Optional[str] = None,
-    token: Optional[str] = None,  
-    user_id: Optional[str] = None,  
     error: Optional[str] = None,
     error_description: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """카카오 OAuth 콜백 처리 - 통합 처리"""
+    """카카오 OAuth 콜백 처리 - 쿠키 기반 JWT 설정"""
     
-    # ✅ 토큰이 있으면 JSON 응답 반환
-    if token and user_id:
-        logger.info(f"Token callback received: user_id={user_id}")
-        return JSONResponse(content={
-            "success": True,
-            "message": "로그인 성공",
-            "token": token,
-            "user_id": user_id,
-            "next_steps": [
-                "1. 포스트맨에서 Authorization: Bearer {token} 헤더 사용",
-                "2. /api/auth/verify 엔드포인트로 토큰 검증",
-                "3. /api/family/setup 엔드포인트로 가족 그룹 생성"
-            ]
-        })
-    
-    # 기존 OAuth 처리 로직 그대로 유지...
+    # 에러 처리
     if error:
         error_msg = error_description or error
         logger.error(f"OAuth error received: {error} - {error_description}")
-        return RedirectResponse(
-            url=f"{kakao_oauth_service.frontend_url}/login?error={error}&message={error_msg}",
-            status_code=302
+        return JSONResponse(
+            content={
+                "success": False,
+                "error": error,
+                "message": error_msg
+            },
+            status_code=400
         )
     
     if not code:
         logger.error("No authorization code received")
-        return RedirectResponse(
-            url=f"{kakao_oauth_service.frontend_url}/login?error=no_code",
-            status_code=302
+        return JSONResponse(
+            content={
+                "success": False,
+                "error": "no_code",
+                "message": "인증 코드가 없습니다."
+            },
+            status_code=400
         )
     
     try:
         logger.info(f"Starting OAuth callback with code: {code[:20]}...")
-        # ... 기존 OAuth 처리 로직 그대로 ...
+        
+        # OAuth 처리
         access_token = await kakao_oauth_service.get_access_token(code)
         kakao_user_info = await kakao_oauth_service.get_user_info(access_token)
         
         if not await kakao_oauth_service.verify_kakao_account(kakao_user_info):
             logger.warning("Account verification failed")
-            return RedirectResponse(
-                url=f"{kakao_oauth_service.frontend_url}/login?error=invalid_kakao_account",
-                status_code=302
+            return JSONResponse(
+                content={
+                    "success": False,
+                    "error": "invalid_account",
+                    "message": "유효하지 않은 카카오 계정입니다."
+                },
+                status_code=400
             )
-
+        
         user = await kakao_oauth_service.login_or_create_user(kakao_user_info, db)
         jwt_token = create_access_token(data={"sub": str(user.id)})
-
-        # ✅ 같은 엔드포인트로 리다이렉트 (이제 token 파라미터 처리됨)
-        redirect_url = f"{kakao_oauth_service.frontend_url}/api/auth/kakao/callback?token={jwt_token}&user_id={user.id}"
-        logger.info(f"Redirecting to: {redirect_url}")
-        return RedirectResponse(url=redirect_url, status_code=302)
-
+        
+        # 성공 응답 - JWT는 쿠키로 설정, JSON에는 사용자 정보만
+        response = JSONResponse(content={
+            "success": True,
+            "user": {
+                "id": str(user.id),
+                "name": user.name,
+                "email": user.email,
+                "profile_image_url": user.profile_image_url,
+                "is_new_user": user.created_at == user.updated_at
+            }
+        })
+        
+        # JWT 토큰을 HttpOnly 쿠키로 설정
+        set_auth_cookie(response, jwt_token)
+        return response
+        
     except Exception as e:
         logger.error(f"OAuth callback failed: {str(e)}", exc_info=True)
-        return RedirectResponse(
-            url=f"{kakao_oauth_service.frontend_url}/login?error=auth_failed",
-            status_code=302
+        return JSONResponse(
+            content={
+                "success": False,
+                "error": "auth_failed",
+                "message": "인증 처리 중 오류가 발생했습니다."
+            },
+            status_code=500
         )
 
-@router.post("/kakao", response_model=KakaoLoginResponse)
+@router.post("/kakao")
 async def kakao_login(
     login_data: SocialLogin,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    카카오 OAuth 로그인 (API 엔드포인트)
-    
+    카카오 OAuth 로그인 (API 엔드포인트) - 쿠키 기반 JWT 설정
     1. 인가 코드로 액세스 토큰 받기
     2. 액세스 토큰으로 사용자 정보 받기
     3. 카카오 계정 검증
     4. 사용자 생성 또는 기존 사용자 반환
-    5. JWT 토큰 발급
+    5. JWT 토큰 발급 (쿠키로 설정)
     """
     try:
         # 1. 액세스 토큰 받기
@@ -118,15 +145,26 @@ async def kakao_login(
         # 5. JWT 토큰 생성
         jwt_token = create_access_token(data={"sub": str(user.id)})
         
-        return KakaoLoginResponse(
-            user=user,
-            is_new_user=user.created_at == user.updated_at,
-            access_token=jwt_token
-        )
+        # 성공 응답 - JWT는 쿠키로 설정
+        response = JSONResponse(content={
+            "success": True,
+            "user": {
+                "id": str(user.id),
+                "name": user.name,
+                "email": user.email,
+                "profile_image_url": user.profile_image_url,
+                "is_new_user": user.created_at == user.updated_at
+            }
+        })
         
+        # JWT 토큰을 HttpOnly 쿠키로 설정
+        set_auth_cookie(response, jwt_token)
+        return response
+        
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
 
 @router.get("/kakao/url")
 async def get_kakao_login_url():
@@ -143,7 +181,6 @@ async def get_kakao_login_url():
     
     return {"login_url": kakao_login_url}
 
-
 @router.get("/me", response_model=dict)
 async def get_current_user_info(
     current_user: User = Depends(get_current_user),
@@ -151,7 +188,6 @@ async def get_current_user_info(
 ):
     """현재 로그인한 사용자 정보 조회"""
     user = await user_crud.get_by_id(db, current_user.id)
-    
     return {
         "id": str(user.id),
         "email": user.email,
@@ -165,7 +201,6 @@ async def get_current_user_info(
         "updated_at": user.updated_at.isoformat()
     }
 
-
 @router.put("/profile", response_model=dict)
 async def update_user_profile(
     profile_data: UserProfileUpdate,
@@ -174,7 +209,6 @@ async def update_user_profile(
 ):
     """사용자 프로필 정보 수정"""
     updated_user = await user_crud.update_profile(db, current_user.id, profile_data)
-    
     return {
         "message": "프로필이 성공적으로 업데이트되었습니다",
         "user": {
@@ -186,12 +220,16 @@ async def update_user_profile(
         }
     }
 
-
 @router.post("/logout")
 async def logout():
-    """로그아웃 (클라이언트에서 토큰 삭제)"""
-    return {"message": "로그아웃되었습니다. 클라이언트에서 토큰을 삭제해주세요."}
-
+    """로그아웃 - 쿠키 삭제"""
+    response = JSONResponse(content={"message": "로그아웃되었습니다."})
+    response.delete_cookie(
+        key=COOKIE_NAME,
+        path="/",
+        # domain=".yourdomain.com"  # 설정 시 동일하게 지정
+    )
+    return response
 
 @router.get("/verify")
 async def verify_token(
