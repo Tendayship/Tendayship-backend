@@ -27,3 +27,7 @@ Pillow
 redis                       
 PyPDF2
 black
+
+APScheduler
+tzlocal
+pytz
