@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime
 
-from backend.app.crud import book_crud
+from ..crud import book_crud
 
 from ..database.session import async_session_maker
 from ..crud.family_crud import family_group_crud

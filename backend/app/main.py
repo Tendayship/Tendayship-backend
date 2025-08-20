@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
 from datetime import datetime
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 import os
@@ -37,8 +38,33 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+from app.core.config import settings
+from app.workers.billing_worker import scheduler
+from app.workers.deadline_worker import scheduler as deadline_scheduler
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("애플리케이션 시작...")
+    if not scheduler.running:
+        scheduler.start()
+        logger.info("정기결제 스케줄러가 시작되었습니다.")
+    if not deadline_scheduler.running:
+        deadline_scheduler.start()
+        logger.info("마감일 처리 스케줄러가 시작되었습니다.")
+    yield
+    # Shutdown
+    logger.info("애플리케이션 종료...")
+    if scheduler.running:
+        scheduler.shutdown()
+        logger.info("정기결제 스케줄러가 종료되었습니다.")
+    if deadline_scheduler.running:
+        deadline_scheduler.shutdown()
+        logger.info("마감일 처리 스케줄러가 종료되었습니다.")
+
 
 app = FastAPI(
     title=settings.APP_NAME,

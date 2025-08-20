@@ -17,11 +17,11 @@ class NotificationService:
     
     def __init__(self):
         # 이메일 설정 (향후 SendGrid, AWS SES 등으로 확장 가능)
-        self.smtp_server = settings.SMTP_SERVER
-        self.smtp_port = settings.SMTP_PORT
-        self.smtp_username = settings.SMTP_USERNAME
-        self.smtp_password = settings.SMTP_PASSWORD
-        self.from_email = settings.FROM_EMAIL
+        # self.smtp_server = settings.SMTP_SERVER
+        self.smtp_port = 587
+        # self.smtp_username = settings.SMTP_USERNAME
+        # self.smtp_password = settings.SMTP_PASSWORD
+        # self.from_email = settings.FROM_EMAIL
     
     async def send_email(
         self,
