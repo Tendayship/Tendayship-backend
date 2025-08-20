@@ -171,10 +171,7 @@ async def get_current_posts(
         # 1. 멤버십 확인
         membership = await family_member_crud.check_user_membership(db, current_user.id)
         if not membership:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="가족 그룹에 속해있지 않습니다"
-            )
+            return []
 
         # 2. 현재 회차 확인
         current_issue = await issue_crud.get_current_issue(db, membership.group_id)

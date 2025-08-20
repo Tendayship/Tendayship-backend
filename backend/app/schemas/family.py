@@ -97,3 +97,14 @@ class InviteCodeValidation(BaseModel):
     current_member_count: Optional[int] = None
     max_members: int = 20
     recipient_name: Optional[str] = None
+
+# 내 그룹 조회 응답 (개선된 오류 처리용)
+class MyGroupOut(BaseModel):
+    group: Optional[FamilyGroupResponse] = None
+    message: Optional[str] = None
+
+# 받는 분 조회 응답 (개선된 오류 처리용)
+class RecipientOut(BaseModel):
+    recipient: Optional[dict] = None
+    group_id: Optional[str] = None
+    message: Optional[str] = None

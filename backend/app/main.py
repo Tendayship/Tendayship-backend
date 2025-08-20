@@ -101,7 +101,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 async def http_exception_handler(request: Request, exc: HTTPException):
     response = JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail}
+        content={"detail": exc.detail, "status_code": exc.status_code}
     )
     # 환경에 따른 동적 CORS 설정
     frontend_url = settings.FRONTEND_URL

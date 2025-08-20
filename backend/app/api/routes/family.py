@@ -11,7 +11,7 @@ from ...crud.member_crud import family_member_crud
 from ...crud.recipient_crud import recipient_crud
 from ...crud.issue_crud import issue_crud
 from ...crud.book_crud import book_crud
-from ...schemas.family import FamilyGroupCreate, FamilyGroupResponse
+from ...schemas.family import FamilyGroupCreate, FamilyGroupResponse, MyGroupOut, RecipientOut
 from ...schemas.user import FamilyGroupSetup
 from ...core.constants import ROLE_LEADER
 from ...models.book import DeliveryStatus, ProductionStatus
@@ -131,7 +131,7 @@ async def setup_family_group(
             detail=f"가족 그룹 설정 중 오류가 발생했습니다: {str(e)}"
         )
 
-@router.get("/recipient", response_model=dict)
+@router.get("/recipient", response_model=RecipientOut)
 async def get_my_recipient(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -139,27 +139,17 @@ async def get_my_recipient(
     """현재 사용자가 속한 그룹의 받는 분 정보 조회"""
     membership = await family_member_crud.check_user_membership(db, current_user.id)
     if not membership:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="속한 가족 그룹이 없습니다"
-        )
+        return {"recipient": None, "group_id": None, "message": "속한 가족 그룹이 없습니다"}
 
     group = await family_group_crud.get(db, membership.group_id)
     if not group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="가족 그룹을 찾을 수 없습니다"
-        )
+        return {"recipient": None, "group_id": str(membership.group_id), "message": "가족 그룹을 찾을 수 없습니다"}
 
     recipient = await recipient_crud.get_by_group_id(db, membership.group_id)
     if not recipient:
-        return {
-            "error": "받는 분 정보 없음",
-            "message": "받는 분 정보가 설정되지 않았습니다",
-            "group_id": str(membership.group_id)
-        }
+        return {"recipient": None, "group_id": str(membership.group_id), "message": "받는 분 정보가 설정되지 않았습니다"}
 
-    return {
+    recipient_data = {
         "id": str(recipient.id),
         "name": recipient.name,
         "address": recipient.address,
@@ -177,6 +167,7 @@ async def get_my_recipient(
         "created_at": recipient.created_at.isoformat() if hasattr(recipient, 'created_at') else None,
         "updated_at": recipient.updated_at.isoformat() if hasattr(recipient, 'updated_at') else None
     }
+    return {"recipient": recipient_data, "group_id": str(membership.group_id)}
 
 @router.post("/create", response_model=FamilyGroupResponse)
 async def create_family_group(
@@ -223,7 +214,7 @@ async def create_family_group(
             detail=f"가족 그룹 생성 중 오류가 발생했습니다: {str(e)}"
         )
 
-@router.get("/my-group", response_model=FamilyGroupResponse)
+@router.get("/my-group", response_model=MyGroupOut)
 async def get_my_family_group(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -231,11 +222,8 @@ async def get_my_family_group(
     """현재 사용자가 속한 가족 그룹 조회"""
     group = await family_group_crud.get_by_user_id(db, current_user.id)
     if not group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="속한 가족 그룹이 없습니다"
-        )
-    return group
+        return {"group": None, "message": "속한 가족 그룹이 없습니다"}
+    return {"group": group}
 
 @router.post("/{group_id}/regenerate-invite")
 async def regenerate_invite_code(

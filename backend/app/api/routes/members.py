@@ -114,10 +114,7 @@ async def get_my_group_members(
         db, current_user.id
     )
     if not membership:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="속한 가족 그룹이 없습니다"
-        )
+        return []
     
     # 그룹 멤버 목록 조회
     members = await family_member_crud.get_group_members(

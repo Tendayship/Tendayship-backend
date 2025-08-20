@@ -27,10 +27,7 @@ async def get_my_books(
         db, current_user.id
     )
     if not membership:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="속한 가족 그룹이 없습니다"
-        )
+        return []
     
     # 그룹의 책자 목록 조회
     books = await book_crud.get_books_by_group(db, membership.group_id)

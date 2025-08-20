@@ -21,10 +21,7 @@ async def get_current_issue_for_group(
     
     membership = await family_member_crud.check_user_membership(db, current_user.id)
     if not membership:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="가족 그룹에 속해있지 않습니다"
-        )
+        return {"message": "가족 그룹에 속해있지 않습니다", "current_issue": None, "group_id": None}
 
     issue = await issue_crud.get_current_issue(db, group_id=membership.group_id)
     if not issue:
@@ -98,10 +95,7 @@ async def get_group_issues(
     """그룹의 모든 회차 목록 조회"""
     membership = await family_member_crud.check_user_membership(db, current_user.id)
     if not membership:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="가족 그룹에 속해있지 않습니다"
-        )
+        return []
 
     try:
         issues_from_db = await issue_crud.get_issues_by_group(db, group_id=membership.group_id)
