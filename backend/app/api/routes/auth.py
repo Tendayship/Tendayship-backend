@@ -27,12 +27,12 @@ def set_auth_cookie(response: JSONResponse, token: str):
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=True,  # HTTPS 환경에서만 전송
-        samesite="Lax",  # CSRF 방지, 필요 시 "None"으로 변경
+        secure=not settings.DEBUG,  # DEBUG=False(운영)이면 secure=True
+        samesite="Lax",
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
-        # domain=".yourdomain.com"  # 필요 시 도메인 설정
     )
+
 
 @router.get("/kakao/callback")
 async def kakao_oauth_callback(
