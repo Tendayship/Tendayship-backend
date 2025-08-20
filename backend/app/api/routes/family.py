@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
 import logging
@@ -10,9 +10,12 @@ from ...crud.family_crud import family_group_crud
 from ...crud.member_crud import family_member_crud
 from ...crud.recipient_crud import recipient_crud
 from ...crud.issue_crud import issue_crud
+from ...crud.book_crud import book_crud
 from ...schemas.family import FamilyGroupCreate, FamilyGroupResponse
 from ...schemas.user import FamilyGroupSetup
 from ...core.constants import ROLE_LEADER
+from ...models.book import DeliveryStatus, ProductionStatus
+from ...services.subscription_admin_service import subscription_admin_service
 
 router = APIRouter(prefix="/family", tags=["family"])
 logger = logging.getLogger(__name__)
@@ -253,3 +256,82 @@ async def regenerate_invite_code(
     group.invite_code = new_invite_code
     await db.commit()
     return {"invite_code": new_invite_code}
+
+@router.delete("/my-group")
+async def delete_my_family_group(
+    force: bool = Query(False, description="배송/제작 진행 중이어도 강제 삭제"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    내 가족 그룹 완전 삭제 (리더 전용)
+    1) 리더 권한 확인
+    2) 배송/제작 진행 상태 점검
+    3) 활성 구독 취소 및 환불 시도
+    4) 구독 데이터 삭제
+    5) 그룹 삭제 (cascade로 연관 데이터 자동 삭제)
+    """
+    # 1) 멤버십 및 리더 권한 확인
+    membership = await family_member_crud.check_user_membership(db, current_user.id)
+    if not membership:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="속한 가족 그룹이 없습니다"
+        )
+    
+    group_id = str(membership.group_id)
+    role_value = membership.role.value if hasattr(membership.role, "value") else str(membership.role)
+    if role_value != ROLE_LEADER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="그룹 리더만 그룹을 삭제할 수 있습니다"
+        )
+
+    # 2) 안전장치: 배송/제작 진행 여부 확인
+    pending_books = await book_crud.get_pending_books_by_group(db, group_id)
+    has_shipping_or_inprogress = any(
+        (b.delivery_status == DeliveryStatus.SHIPPING or b.production_status == ProductionStatus.IN_PROGRESS)
+        for b in pending_books
+    )
+    if has_shipping_or_inprogress and not force:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="배송/제작 진행 중인 책자가 있어 삭제할 수 없습니다. force=true로 강제 삭제 가능합니다."
+        )
+
+    try:
+        # 3) 활성 구독 취소 시도 (환불 포함)
+        cancel_info = await subscription_admin_service.cancel_active_subscription_if_any(db, group_id)
+        await db.commit()
+
+        # 4) 구독 물리 삭제
+        deleted_subscriptions = await subscription_admin_service.hard_delete_subscription_by_group(db, group_id)
+        await db.commit()
+
+        # 5) 그룹 삭제 (연관 members/recipient/issues/posts/books는 cascade로 삭제)
+        removed = await family_group_crud.remove(db, id=group_id)
+        if not removed:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="그룹을 찾을 수 없습니다"
+            )
+        await db.commit()
+
+        logger.info(f"그룹 삭제 완료 - group_id: {group_id}, user_id: {current_user.id}")
+        return {
+            "message": "가족 그룹이 완전히 삭제되었습니다",
+            "subscription_cancel": cancel_info,
+            "subscription_deleted": bool(deleted_subscriptions),
+            "pending_books_count": len(pending_books)
+        }
+        
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"그룹 삭제 중 오류: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"그룹 삭제 중 오류가 발생했습니다: {str(e)}"
+        )

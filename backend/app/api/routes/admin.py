@@ -10,9 +10,13 @@ from ...crud.family_crud import family_group_crud
 from ...crud.issue_crud import issue_crud
 from ...crud.book_crud import book_crud
 from ...crud.post_crud import post_crud
+from ...crud.member_crud import family_member_crud
 from ...services.pdf_service import pdf_service
+from ...services.subscription_admin_service import subscription_admin_service
 from ...schemas.book import BookStatusUpdate
+from ...models.book import DeliveryStatus, ProductionStatus
 from ...core.config import settings
+from ...core.constants import ROLE_LEADER
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -134,3 +138,130 @@ async def update_book_status(
 
     updated_book = await book_crud.update(db, db_obj=book, obj_in=update_data)
     return updated_book
+
+@router.delete("/groups/{group_id}")
+async def admin_delete_group(
+    group_id: str,
+    force: bool = Query(True, description="배송/제작 진행 중이어도 강제 삭제 (관리자 기본값)"),
+    _admin_user: User = Depends(verify_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    관리자용 그룹 삭제
+    - 활성 구독 취소 및 환불 시도
+    - 구독 데이터 완전 삭제
+    - 그룹 및 모든 연관 데이터 삭제
+    """
+    # 그룹 존재 확인
+    group = await family_group_crud.get(db, group_id)
+    if not group:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="그룹을 찾을 수 없습니다"
+        )
+
+    # 배송/제작 진행 체크 (관리자는 기본 force=True)
+    pending_books = await book_crud.get_pending_books_by_group(db, group_id)
+    has_shipping_or_inprogress = any(
+        (b.delivery_status == DeliveryStatus.SHIPPING or b.production_status == ProductionStatus.IN_PROGRESS)
+        for b in pending_books
+    )
+    if has_shipping_or_inprogress and not force:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="배송/제작 진행 중인 책자가 있어 삭제할 수 없습니다. force=true로 강제 삭제 가능합니다."
+        )
+
+    try:
+        # 활성 구독 취소 시도
+        cancel_info = await subscription_admin_service.cancel_active_subscription_if_any(db, group_id)
+        await db.commit()
+
+        # 구독 물리 삭제
+        deleted_subscriptions = await subscription_admin_service.hard_delete_subscription_by_group(db, group_id)
+        await db.commit()
+
+        # 그룹 삭제
+        removed = await family_group_crud.remove(db, id=group_id)
+        if not removed:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="그룹 삭제 실패 (이미 삭제되었을 수 있음)"
+            )
+        await db.commit()
+
+        return {
+            "message": f"그룹이 관리자에 의해 삭제되었습니다 (ID: {group_id})",
+            "group_name": group.group_name,
+            "subscription_cancel": cancel_info,
+            "subscription_deleted": bool(deleted_subscriptions),
+            "pending_books_count": len(pending_books),
+            "admin_email": _admin_user.email
+        }
+        
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"관리자 그룹 삭제 중 오류: {str(e)}"
+        )
+
+@router.delete("/members/{member_id}")
+async def admin_remove_member(
+    member_id: str,
+    _admin_user: User = Depends(verify_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    관리자용 멤버 삭제
+    - 리더 삭제는 정책상 차단 (그룹이 리더 없는 상태가 되는 것을 방지)
+    - 일반 멤버는 삭제 허용
+    """
+    # 멤버 존재 확인
+    target_member = await family_member_crud.get(db, member_id)
+    if not target_member:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="멤버를 찾을 수 없습니다"
+        )
+
+    # 멤버 정보 조회 (그룹 정보 포함)
+    group = await family_group_crud.get(db, target_member.group_id)
+    member_role = getattr(target_member, "role", None)
+    
+    # 리더 삭제 정책상 차단
+    if member_role == ROLE_LEADER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"리더 멤버는 관리자 권한으로도 삭제할 수 없습니다. 그룹 삭제를 사용해주세요. (그룹: {group.group_name if group else 'Unknown'})"
+        )
+
+    try:
+        # 멤버 삭제
+        removed = await family_member_crud.remove(db, id=member_id)
+        if not removed:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="멤버 삭제 실패"
+            )
+        await db.commit()
+        
+        return {
+            "message": "멤버가 관리자에 의해 삭제되었습니다",
+            "member_id": member_id,
+            "group_name": group.group_name if group else "Unknown",
+            "admin_email": _admin_user.email
+        }
+        
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"관리자 멤버 삭제 중 오류: {str(e)}"
+        )
