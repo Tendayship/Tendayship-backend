@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List
 
+from ...schemas.issue import IssueListResponse
 from ...api.dependencies import get_db, get_current_user
 from ...crud.issue_crud import issue_crud
 from ...crud.member_crud import family_member_crud
@@ -88,13 +90,12 @@ async def create_new_issue(
             detail=f"회차 생성 중 오류가 발생했습니다: {str(e)}"
         )
 
-@router.get("/", response_model=list)
+@router.get("/", response_model=List[IssueListResponse])
 async def get_group_issues(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """그룹의 모든 회차 목록 조회"""
-    
     membership = await family_member_crud.check_user_membership(db, current_user.id)
     if not membership:
         raise HTTPException(
@@ -103,8 +104,24 @@ async def get_group_issues(
         )
 
     try:
-        issues = await issue_crud.get_issues_by_group(db, group_id=membership.group_id)
-        return issues
+        issues_from_db = await issue_crud.get_issues_by_group(db, group_id=membership.group_id)
+        
+        # DB 객체를 Pydantic 스키마 리스트로 변환
+        response_issues = []
+        for issue in issues_from_db:
+            post_count = await issue_crud.count_posts_by_issue(db, str(issue.id))
+            response_issues.append(
+                IssueListResponse(
+                    id=str(issue.id),
+                    issue_number=issue.issue_number,
+                    deadline_date=issue.deadline_date,
+                    status=issue.status,
+                    post_count=post_count,
+                    published_at=issue.published_at
+                )
+            )
+        
+        return response_issues
         
     except Exception as e:
         raise HTTPException(
