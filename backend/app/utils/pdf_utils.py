@@ -10,13 +10,30 @@ import io
 from PIL import Image as PILImage
 import requests
 from typing import Optional
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase import pdfmetrics
+import os
 
 class FamilyNewsPDFGenerator:
     """가족 소식 PDF 생성기"""
     
     def __init__(self):
+        self.setup_fonts()
         self.styles = getSampleStyleSheet()
         self.setup_custom_styles()
+
+    def setup_fonts(self):
+        """한글 폰트 등록"""
+        try:
+            font_path = os.path.join(os.path.dirname(__file__), 'fonts', 'NanumGothic.ttf')
+            bold_font_path = os.path.join(os.path.dirname(__file__), 'fonts', 'NanumGothicBold.ttf')
+            
+            pdfmetrics.registerFont(TTFont('NanumGothic', font_path))
+            pdfmetrics.registerFont(TTFont('NanumGothicBold', bold_font_path))
+        except Exception as e:
+            print(f"폰트 파일을 로드할 수 없습니다. backend/app/utils/fonts/ 경로에 NanumGothic.ttf, NanumGothicBold.ttf 파일이 있는지 확인하세요. 오류: {e}")
+            # 폰트 로드 실패 시 기본 폰트로 대체 (한글 깨짐 발생)
+            pass
     
     def setup_custom_styles(self):
         """커스텀 스타일 설정"""
@@ -24,42 +41,53 @@ class FamilyNewsPDFGenerator:
         self.styles.add(ParagraphStyle(
             name='FamilyTitle',
             parent=self.styles['Title'],
+            fontName='NanumGothicBold',
             fontSize=24,
-            textColor=colors.HexColor('#018941'),  # 서비스 메인 컬러
+            textColor=colors.HexColor('#018941'), # 서비스 메인 컬러
             alignment=TA_CENTER,
             spaceAfter=20
         ))
-        
+
         # 소제목 스타일
         self.styles.add(ParagraphStyle(
             name='IssueTitle',
             parent=self.styles['Heading1'],
+            fontName='NanumGothicBold',
             fontSize=18,
             textColor=colors.HexColor('#018941'),
             alignment=TA_CENTER,
             spaceAfter=15
         ))
-        
+
         # 작성자 정보 스타일
         self.styles.add(ParagraphStyle(
             name='AuthorInfo',
             parent=self.styles['Normal'],
+            fontName='NanumGothic',
             fontSize=10,
             textColor=colors.grey,
             alignment=TA_LEFT,
             spaceBefore=5
         ))
-        
+
         # 소식 내용 스타일
         self.styles.add(ParagraphStyle(
             name='PostContent',
             parent=self.styles['Normal'],
+            fontName='NanumGothic',
             fontSize=12,
             alignment=TA_LEFT,
             leftIndent=10,
             rightIndent=10,
             spaceBefore=10,
-            spaceAfter=10
+            spaceAfter=10,
+            leading=18
+        ))
+
+        self.styles.add(ParagraphStyle(
+            name='NormalKorean',
+            parent=self.styles['Normal'],
+            fontName='NanumGothic',
         ))
     
     def generate_pdf(
@@ -80,18 +108,18 @@ class FamilyNewsPDFGenerator:
             topMargin=2*cm,
             bottomMargin=2*cm
         )
-        
+
         # 스토리(페이지 내용) 구성
         story = []
-        
+
         # 표지 생성
         story.extend(self._create_cover_page(recipient_name, issue_number, deadline_date))
         story.append(PageBreak())
-        
+
         # 소식 페이지들 생성
         for i, post in enumerate(posts):
             story.extend(self._create_post_page(post, i + 1, len(posts)))
-            if i < len(posts) - 1:  # 마지막 페이지가 아니면 페이지 브레이크
+            if i < len(posts) - 1: # 마지막 페이지가 아니면 페이지 브레이크
                 story.append(PageBreak())
         
         # PDF 빌드
@@ -124,7 +152,7 @@ class FamilyNewsPDFGenerator:
         # 회차 정보
         issue_info = Paragraph(
             f"제 {issue_number}호 ({deadline_date.strftime('%Y년 %m월')})", 
-            self.styles['Normal']
+            self.styles['NormalKorean']
         )
         elements.append(issue_info)
         elements.append(Spacer(1, 2*inch))
@@ -133,7 +161,7 @@ class FamilyNewsPDFGenerator:
         publish_info = Paragraph(
             f"발행일: {datetime.now().strftime('%Y년 %m월 %d일')}<br/>"
             f"발행처: 가족 소식 서비스",
-            self.styles['Normal']
+            self.styles['NormalKorean']
         )
         elements.append(publish_info)
         
@@ -155,13 +183,13 @@ class FamilyNewsPDFGenerator:
         )
         elements.append(header)
         elements.append(Spacer(1, 0.3*inch))
-        
+
         # 작성자 정보
-        author_info = Paragraph(
-            f"{post.get('author_name', '')} ({post.get('author_relationship', '')}) | "
-            f"{post.get('created_at', '').strftime('%m월 %d일') if post.get('created_at') else ''}",
-            self.styles['AuthorInfo']
-        )
+        author_info_text = f"{post.get('author_name', '')} ({post.get('author_relationship', '')}) | "
+        if post.get('created_at'):
+            author_info_text += post['created_at'].strftime('%m월 %d일')
+
+        author_info = Paragraph(author_info_text, self.styles['AuthorInfo'])
         elements.append(author_info)
         elements.append(Spacer(1, 0.2*inch))
         
@@ -173,7 +201,7 @@ class FamilyNewsPDFGenerator:
         
         # 소식 내용
         if post.get('content'):
-            content = Paragraph(post['content'], self.styles['PostContent'])
+            content = Paragraph(post['content'].replace('\n', '<br/>'), self.styles['PostContent'])
             elements.append(content)
         
         return elements
@@ -181,7 +209,6 @@ class FamilyNewsPDFGenerator:
     def _create_image_layout(self, image_urls: List[str]) -> List:
         """이미지 레이아웃 생성 (콜라주 형태)"""
         elements = []
-        image_count = len(image_urls)
         
         # 이미지 다운로드 및 처리
         processed_images = []
@@ -196,6 +223,8 @@ class FamilyNewsPDFGenerator:
         
         if not processed_images:
             return elements
+
+        image_count = len(processed_images)
         
         # 이미지 개수에 따른 레이아웃
         if image_count == 1:
@@ -248,7 +277,7 @@ class FamilyNewsPDFGenerator:
             # URL에서 이미지 다운로드
             response = requests.get(image_url, timeout=10)
             response.raise_for_status()
-            
+
             # PIL로 이미지 처리
             image = PILImage.open(io.BytesIO(response.content))
             
