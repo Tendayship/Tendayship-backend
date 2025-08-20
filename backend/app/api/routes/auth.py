@@ -28,7 +28,7 @@ def set_auth_cookie(response, token: str):
         value=token,
         httponly=True,
         secure=not settings.DEBUG,  # DEBUG 환경 기반 동적 설정
-        samesite="Lax",
+        samesite="None",
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
     )
