@@ -31,15 +31,29 @@ class KakaoOAuthService:
                     "redirect_uri": self.redirect_uri,
                     "code": code,
                 },
-                headers={"Content-Type": "application/x-www-form-urlencoded;charset=utf-8"}
+                headers={"Content-Type": "application/x-www-form-urlencoded;charset=utf-8"},
+                timeout=10
             )
             
             if token_response.status_code != 200:
-                raise HTTPException(status_code=400, detail="카카오 토큰 요청 실패")
+                # 카카오가 주는 실제 에러 메시지 확인
+                try:
+                    error_detail = token_response.json()
+                    print(f"Kakao token error {token_response.status_code}: {error_detail}")
+                except:
+                    error_detail = token_response.text
+                    print(f"Kakao token error {token_response.status_code}: {error_detail}")
                 
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"카카오 토큰 요청 실패: {error_detail}"
+                )
+            
             token_data = token_response.json()
             return token_data.get("access_token")
             
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"카카오 OAuth 오류: {str(e)}")
     
