@@ -147,7 +147,7 @@ async def remove_member(
         db, current_user.id, target_member.group_id
     )
     
-    if not current_membership or current_membership.role != ROLE_LEADER:
+    if not current_membership or current_membership.role.value != ROLE_LEADER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="그룹 리더만 멤버를 제거할 수 있습니다"
@@ -161,6 +161,17 @@ async def remove_member(
         )
     
     # 멤버 제거
-    await family_member_crud.remove(db, id=member_id)
+    try:
+        # 멤버 제거
+        await family_member_crud.remove(db, id=member_id)
+        # 변경사항을 데이터베이스에 커밋
+        await db.commit()
+    except Exception as e:
+        # 오류 발생 시 롤백
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"멤버 삭제 중 오류가 발생했습니다: {str(e)}"
+        )
     
     return {"message": "멤버가 성공적으로 제거되었습니다"}
