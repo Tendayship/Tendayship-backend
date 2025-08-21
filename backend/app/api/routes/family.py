@@ -16,11 +16,13 @@ from ...schemas.user import FamilyGroupSetup
 from ...core.constants import ROLE_LEADER
 from ...models.book import DeliveryStatus, ProductionStatus
 from ...services.subscription_admin_service import subscription_admin_service
+from ...schemas.recipient import RecipientCreate
+from ...models.family import RelationshipType, MemberRole 
+
 
 router = APIRouter(prefix="/family", tags=["family"])
 logger = logging.getLogger(__name__)
 
-# 마감일 계산 함수
 def calculate_deadline_date(deadline_type: str) -> datetime:
     """다음 달의 해당 일요일 계산"""
     now = datetime.now()
@@ -28,13 +30,17 @@ def calculate_deadline_date(deadline_type: str) -> datetime:
         next_month = now.replace(year=now.year + 1, month=1, day=1)
     else:
         next_month = now.replace(month=now.month + 1, day=1)
+        
+    # 다음 달 첫째 날부터 일요일 찾기
     first_sunday = next_month
     while first_sunday.weekday() != 6:  # 일요일 = 6
         first_sunday += timedelta(days=1)
+    
     if deadline_type == "SECOND_SUNDAY":
-        return first_sunday + timedelta(days=7)   # 둘째 주 일요일
+        return first_sunday + timedelta(days=7)  # 둘째 주 일요일
     else:  # FOURTH_SUNDAY
-        return first_sunday + timedelta(days=21)  # 넷째 주 일요일
+        return first_sunday + timedelta(days=21) 
+    
 
 @router.post("/setup", response_model=dict)
 async def setup_family_group(
@@ -42,14 +48,8 @@ async def setup_family_group(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    가족 그룹 초기 설정 (새 사용자용)
-    1) 기존 멤버십 확인
-    2) 그룹 생성
-    3) 받는 분 생성
-    4) 첫 회차 생성
-    5) 리더 멤버 추가
-    """
+    """가족 그룹 초기 설정 (새 사용자용)"""
+    
     existing_membership = await family_member_crud.check_user_membership(db, current_user.id)
     if existing_membership:
         raise HTTPException(
@@ -58,57 +58,69 @@ async def setup_family_group(
         )
 
     try:
-        # 2. 그룹 생성
-        group_data = {
-            "group_name": setup_data.group_name,
-            "leader_id": current_user.id,
-            "deadline_type": setup_data.deadline_type,
-            "leader_relationship": setup_data.leader_relationship
-        }
-        db_group = await family_group_crud.create_with_leader(db, group_data, current_user.id)
-
-        # 3. 받는 분 생성 (group_id 포함)
+        # 2. 받는 분 정보 스키마 생성
+        recipient_info = RecipientCreate(
+            name=setup_data.recipient_name,
+            address=setup_data.recipient_address,
+            address_detail=setup_data.recipient_address_detail,
+            postal_code=setup_data.recipient_postal_code or "00000",
+            phone=setup_data.recipient_phone or current_user.phone
+        )
+        
+        # 3. 그룹 생성 스키마 생성
+        group_create_data = FamilyGroupCreate(
+            group_name=setup_data.group_name,
+            deadline_type=setup_data.deadline_type,  # Enum은 자동 변환
+            leader_relationship=setup_data.leader_relationship,  # Enum은 자동 변환
+            recipient_info=recipient_info
+        )
+        
+        # 4. 그룹 생성
+        db_group = await family_group_crud.create_with_leader(db, group_create_data, current_user.id)
+        
+        # 5. 받는 분 생성 (그룹 ID 설정)
         recipient_data = {
-            "name": setup_data.recipient_name,
-            "address": setup_data.recipient_address,
-            "address_detail": setup_data.recipient_address_detail,
-            "postal_code": setup_data.recipient_postal_code or "00000",
-            "phone": setup_data.recipient_phone or current_user.phone,
+            "name": recipient_info.name,
+            "address": recipient_info.address,
+            "address_detail": recipient_info.address_detail,
+            "postal_code": recipient_info.postal_code,
+            "phone": recipient_info.phone,
             "group_id": db_group.id
         }
         db_recipient = await recipient_crud.create(db, recipient_data)
-
-        # 4. 첫 회차 생성
-        deadline_date = calculate_deadline_date(setup_data.deadline_type)
+        
+        # 6. 첫 회차 생성
+        deadline_date = calculate_deadline_date(setup_data.deadline_type.value)
         issue_data = {
-            "group_id": str(db_group.id),
+            "group_id": db_group.id,  # UUID 그대로 유지
             "issue_number": 1,
             "deadline_date": deadline_date.date(),
-            "status": "OPEN"
+            "status": "OPEN"  # 상수 사용 또는 Enum 확인 필요
         }
         db_issue = await issue_crud.create(db, issue_data)
-
-        # 5. 리더 멤버 추가
+        
+        # 7. 리더 멤버 추가 - Enum 변환
+        relationship_enum = RelationshipType(setup_data.leader_relationship.value)
         await family_member_crud.create_member(
             db=db,
             user_id=current_user.id,
             group_id=db_group.id,
             recipient_id=db_recipient.id,
-            relationship=setup_data.leader_relationship,
-            role=ROLE_LEADER
+            relationship=relationship_enum,
+            role=MemberRole.LEADER  # 상수 대신 Enum 사용
         )
-
+        
         await db.commit()
         await db.refresh(db_group)
-
+        
         return {
             "message": "가족 그룹이 성공적으로 생성되었습니다",
             "group": {
                 "id": str(db_group.id),
                 "group_name": db_group.group_name,
                 "invite_code": db_group.invite_code,
-                "deadline_type": db_group.deadline_type,
-                "status": db_group.status
+                "deadline_type": db_group.deadline_type.value if hasattr(db_group.deadline_type, 'value') else str(db_group.deadline_type),
+                "status": db_group.status.value if hasattr(db_group.status, 'value') else str(db_group.status)
             },
             "recipient": {
                 "id": str(db_recipient.id),
@@ -120,10 +132,10 @@ async def setup_family_group(
                 "id": str(db_issue.id),
                 "issue_number": db_issue.issue_number,
                 "deadline_date": db_issue.deadline_date.isoformat(),
-                "status": db_issue.status
+                "status": db_issue.status.value if hasattr(db_issue.status, 'value') else str(db_issue.status)
             }
         }
-
+        
     except Exception as e:
         await db.rollback()
         raise HTTPException(

@@ -18,21 +18,26 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
     async def create_with_leader(
         self,
         db: AsyncSession,
-        group_data: FamilyGroupCreate,
+        group_data: FamilyGroupCreate,  # 타입 명시
         leader_id: str
     ) -> FamilyGroup:
         """리더와 함께 가족 그룹 생성"""
         invite_code = self._generate_invite_code()
         
+        # Enum 값 변환 처리
+        deadline_type_value = group_data.deadline_type.value if hasattr(group_data.deadline_type, 'value') else group_data.deadline_type
+        
         db_group = FamilyGroup(
             group_name=group_data.group_name,
             leader_id=leader_id,
             invite_code=invite_code,
-            deadline_type=group_data.deadline_type,
+            deadline_type=deadline_type_value,  # 문자열 값으로 변환
             status=GROUP_STATUS_ACTIVE
         )
+        
         db.add(db_group)
         return db_group
+
 
     async def get_by_invite_code(self, db: AsyncSession, invite_code: str) -> Optional[FamilyGroup]:
         result = await db.execute(
