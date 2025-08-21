@@ -8,12 +8,15 @@ from .config import settings
 
 def create_access_token(
     data: Dict[str, Any], 
-    expires_delta: Optional[timedelta] = None
+    expires_delta: Optional[timedelta] = None,
+    expires_minutes: Optional[int] = None
 ) -> str:
     """JWT 액세스 토큰 생성"""
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
+    elif expires_minutes:
+        expire = datetime.utcnow() + timedelta(minutes=expires_minutes)
     else:
         expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     

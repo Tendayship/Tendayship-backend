@@ -14,7 +14,7 @@ from ..models.user import User
 security = HTTPBearer(auto_error=False)  # auto_error=False로 설정
 
 # 쿠키 이름 상수
-COOKIE_NAME = "access_token"
+ACCESS_COOKIE_NAME = "access_token"
 
 async def get_current_user(
     request: Request,
@@ -28,7 +28,7 @@ async def get_current_user(
     )
     
     # 1. 쿠키에서 토큰 우선 확인
-    token = request.cookies.get(COOKIE_NAME)
+    token = request.cookies.get(ACCESS_COOKIE_NAME)
     
     # 2. 쿠키에 없으면 Authorization 헤더에서 확인 (fallback)
     if not token and credentials and credentials.scheme.lower() == "bearer":

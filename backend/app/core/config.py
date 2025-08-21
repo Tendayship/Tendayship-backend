@@ -31,8 +31,12 @@ class Settings(BaseSettings):
         description="허용된 호스트 목록"
     )
 
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
-    SECRET_KEY: str
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 14
+    TOKEN_COOKIE_DOMAIN: Optional[str] = None
+    REFRESH_TOKEN_PATH: str = "/api/auth/refresh"
+    ACCESS_TOKEN_PATH: str = "/"
+    ISSUE_REFRESH_ON_VERIFY: bool = False
 
     # 저장소 타입 설정 추가
     STORAGE_TYPE: str = Field(

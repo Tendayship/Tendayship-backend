@@ -1,5 +1,6 @@
 from .base import Base, TimestampMixin, UUIDMixin
 from .user import User
+from .refresh_token import RefreshToken
 from .recipient import Recipient
 from .family import (
     FamilyGroup,
@@ -19,6 +20,7 @@ __all__ = [
     "TimestampMixin",
     "UUIDMixin",
     "User",
+    "RefreshToken",
     "FamilyGroup",
     "Recipient",
     "FamilyMember",

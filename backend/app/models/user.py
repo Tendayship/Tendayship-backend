@@ -32,3 +32,4 @@ class User(Base, UUIDMixin, TimestampMixin):
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     subscriptions = relationship("Subscription", back_populates="payer", cascade="all, delete-orphan")
     led_groups = relationship("FamilyGroup", back_populates="leader")
+    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")

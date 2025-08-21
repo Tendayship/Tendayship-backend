@@ -14,6 +14,42 @@ import os
 load_dotenv()
 
 from .core.config import settings
+
+# CORS 허용 오리진 집합 구성
+def _get_allowed_origins_set() -> set[str]:
+    """허용된 오리진 목록을 집합으로 반환"""
+    origins = set()
+    try:
+        # CORSMiddleware에 설정된 오리진들
+        origins.update([
+            "https://kind-sky-0070e521e.2.azurestaticapps.net",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000", 
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173"
+        ])
+        # FRONTEND_URL도 추가
+        if getattr(settings, "FRONTEND_URL", None):
+            origins.add(settings.FRONTEND_URL)
+    except Exception:
+        pass
+    return origins
+
+ALLOWED_ORIGINS_SET = _get_allowed_origins_set()
+
+def _conditionally_set_cors_headers(request: Request, response: JSONResponse):
+    """
+    CORSMiddleware가 이미 처리하지만, 전역 예외 핸들러에서 수동으로 헤더를 넣어야 할 경우
+    요청 Origin이 허용 목록에 있을 때만 반영한다.
+    """
+    origin = request.headers.get("origin")
+    if origin and origin in ALLOWED_ORIGINS_SET:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        # 나머지 헤더들은 CORSMiddleware가 처리하므로 생략
 from .core.exceptions import (
     FamilyNewsException,
     family_news_exception_handler,
@@ -168,12 +204,8 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
     
-    # 환경에 따른 동적 CORS 설정
-    frontend_url = settings.FRONTEND_URL
-    response.headers["Access-Control-Allow-Origin"] = frontend_url
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "*"
+    # 조건부 CORS 헤더 설정 (요청 Origin이 허용 목록에 있을 때만)
+    _conditionally_set_cors_headers(request, response)
     
     return response
 
@@ -184,12 +216,8 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
         content={"detail": exc.detail, "status_code": exc.status_code}
     )
     
-    # 환경에 따른 동적 CORS 설정
-    frontend_url = settings.FRONTEND_URL
-    response.headers["Access-Control-Allow-Origin"] = frontend_url
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "*"
+    # 조건부 CORS 헤더 설정 (요청 Origin이 허용 목록에 있을 때만)
+    _conditionally_set_cors_headers(request, response)
     
     return response
 
@@ -279,12 +307,8 @@ async def not_found_handler(request: Request, exc):
         }
     )
     
-    # 환경에 따른 동적 CORS 설정
-    frontend_url = settings.FRONTEND_URL
-    response.headers["Access-Control-Allow-Origin"] = frontend_url
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "*"
+    # 조건부 CORS 헤더 설정 (요청 Origin이 허용 목록에 있을 때만)
+    _conditionally_set_cors_headers(request, response)
     
     return response
 
