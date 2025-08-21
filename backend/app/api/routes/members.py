@@ -70,6 +70,9 @@ async def join_family_group(
             relationship=join_data.relationship,
             role=ROLE_MEMBER
         )
+
+        await db.commit()
+        await db.refresh(new_member)
         
         return new_member
         
