@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request , status
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -383,3 +383,47 @@ async def verify_token(
         "email": current_user.email,
         "name": current_user.name
     }
+
+@router.post("/withdraw")
+async def withdraw_account(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    회원 탈퇴 (계정 비활성화)
+    1. 사용자를 비활성 상태로 변경 (소프트 삭제)
+    2. 사용자의 모든 리프레시 토큰 폐기
+    3. 현재 세션의 인증 쿠키 삭제
+    """
+    try:
+        # 1. 사용자 비활성화
+        success = await user_crud.deactivate_user(db, current_user.id)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="사용자를 찾을 수 없습니다."
+            )
+
+        # 2. 모든 리프레시 토큰 폐기
+        await revoke_all_refresh_tokens_for_user(db, str(current_user.id))
+
+        # 3. DB 변경사항 커밋
+        await db.commit()
+
+        # 4. 로그아웃 (쿠키 삭제)
+        response = JSONResponse(content={"message": "회원 탈퇴가 성공적으로 처리되었습니다."})
+        clear_auth_cookies(response)
+        return response
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"회원 탈퇴 처리 중 오류 발생: {str(e)}", exc_info=True)
+        # 클라이언트 측에서는 이미 탈퇴 처리가 되었을 수 있으므로,
+        # 에러가 발생하더라도 쿠키는 삭제하여 로그아웃 상태로 만듭니다.
+        response = JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "회원 탈퇴 처리 중 서버 오류가 발생했습니다."}
+        )
+        clear_auth_cookies(response)
+        return response
