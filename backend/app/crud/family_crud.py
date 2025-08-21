@@ -1,10 +1,9 @@
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func, case
+from sqlalchemy import select, and_, func
 from sqlalchemy.orm import selectinload, joinedload
 import secrets
 import string
-
 from .base import BaseCRUD
 from ..models.family import FamilyGroup, FamilyMember
 from ..models.issue import Issue, IssueStatus
@@ -23,10 +22,10 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
     ) -> FamilyGroup:
         """리더와 함께 가족 그룹 생성"""
         invite_code = self._generate_invite_code()
-        
+
         # Enum 값 변환 처리 - 안전한 방식
         deadline_type_value = group_data.deadline_type.value if hasattr(group_data.deadline_type, 'value') else str(group_data.deadline_type)
-        
+
         db_group = FamilyGroup(
             group_name=group_data.group_name,
             leader_id=leader_id,
@@ -34,8 +33,10 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
             deadline_type=deadline_type_value,  # 문자열 값으로 변환
             status=GROUP_STATUS_ACTIVE
         )
-        
+
         db.add(db_group)
+        await db.flush()  # INSERT를 DB로 보내고 PK(ID)를 채움
+        await db.refresh(db_group)  # ID를 ORM 객체에 반영
         return db_group
 
     async def get_by_invite_code(self, db: AsyncSession, invite_code: str) -> Optional[FamilyGroup]:
