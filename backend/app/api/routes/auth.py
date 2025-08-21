@@ -15,7 +15,6 @@ from ...models.user import User
 from ...crud.user_crud import user_crud
 from ...crud.refresh_token_crud import refresh_token_crud
 from ...core.config import settings
-
 import logging
 import uuid
 
@@ -86,7 +85,6 @@ async def save_refresh_token(db: AsyncSession, user_id: str, rt_hash: str, expir
     device_info = None
     ip_address = None
     user_agent = None
-    
     if request:
         ip_address = request.client.host if request.client else None
         user_agent = request.headers.get("User-Agent")
@@ -113,7 +111,6 @@ async def revoke_all_refresh_tokens_for_user(db: AsyncSession, user_id: str):
     """DB에서 사용자의 모든 리프레시 토큰 폐기"""
     return await refresh_token_crud.revoke_all_user_tokens(db, uuid.UUID(user_id))
 
-
 @router.get("/kakao/callback")
 async def kakao_oauth_callback(
     request: Request,
@@ -123,7 +120,6 @@ async def kakao_oauth_callback(
     db: AsyncSession = Depends(get_db)
 ):
     """카카오 OAuth 콜백 처리 - 프론트 콜백 페이지로 리다이렉트"""
-    
     # 에러 처리
     if error:
         error_msg = error_description or error
@@ -132,14 +128,14 @@ async def kakao_oauth_callback(
             url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason={error}",
             status_code=302
         )
-    
+
     if not code:
         logger.error("No authorization code received")
         return RedirectResponse(
             url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason=no_code",
             status_code=302
         )
-    
+
     try:
         logger.info(f"Starting OAuth callback with code: {code[:20]}...")
         
@@ -153,26 +149,36 @@ async def kakao_oauth_callback(
                 url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason=invalid_account",
                 status_code=302
             )
-        
+
         user = await kakao_oauth_service.login_or_create_user(kakao_user_info, db)
+        
+        # ✅ 핵심 수정: user.id 확정을 위한 flush/refresh
+        await db.flush()
+        await db.refresh(user)
+        
+        # user.id가 확정된 후 로깅으로 확인
+        logger.info(f"User ID type: {type(user.id)}, value: {user.id}")
+        
         access_jwt = create_access_token(data={"sub": str(user.id)}, expires_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         
         # Refresh Token 생성(opaque string)
         refresh_token = secrets.token_urlsafe(64)
         rt_expires = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        
         await save_refresh_token(db, str(user.id), hash_token(refresh_token), rt_expires, request)
         
         # 모든 토큰 작업 완료 후 단일 커밋
         await db.commit()
-        
+
         response = RedirectResponse(
             url=f"{settings.FRONTEND_URL}/auth/callback/success",
             status_code=302
         )
+        
         set_access_cookie(response, access_jwt)
         set_refresh_cookie(response, refresh_token)
         return response
-        
+
     except Exception as e:
         logger.error(f"OAuth callback failed: {str(e)}", exc_info=True)
         await db.rollback()  # 예외 시 롤백으로 일관성 보장
@@ -205,21 +211,29 @@ async def kakao_login(
         # 3. 카카오 계정 검증
         if not await kakao_oauth_service.verify_kakao_account(kakao_user_info):
             raise HTTPException(status_code=400, detail="유효하지 않은 카카오 계정입니다")
-        
+
         # 4. 로그인 또는 회원가입
         user = await kakao_oauth_service.login_or_create_user(kakao_user_info, db)
         
+        # ✅ 핵심 수정: user.id 확정을 위한 flush/refresh
+        await db.flush()
+        await db.refresh(user)
+        
+        # user.id가 확정된 후 로깅으로 확인
+        logger.info(f"User ID type: {type(user.id)}, value: {user.id}")
+
         # 5. JWT 토큰 생성
         access_jwt = create_access_token(data={"sub": str(user.id)}, expires_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         
         # Refresh Token 생성(opaque string)
         refresh_token = secrets.token_urlsafe(64)
         rt_expires = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        
         await save_refresh_token(db, str(user.id), hash_token(refresh_token), rt_expires, request)
         
         # 모든 토큰 작업 완료 후 단일 커밋
         await db.commit()
-        
+
         response = JSONResponse(content={
             "success": True,
             "user": {
@@ -230,10 +244,11 @@ async def kakao_login(
                 "is_new_user": user.created_at == user.updated_at
             }
         })
+        
         set_access_cookie(response, access_jwt)
         set_refresh_cookie(response, refresh_token)
         return response
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -252,7 +267,6 @@ async def get_kakao_login_url():
         f"&response_type=code"
         f"&state=random_state_string"  # CSRF 방지
     )
-    
     return {"login_url": kakao_login_url}
 
 @router.get("/me", response_model=dict)
@@ -299,18 +313,17 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
     """로그아웃 - RT 폐기 및 쿠키 삭제"""
     try:
         rt = request.cookies.get(REFRESH_COOKIE_NAME)
-        
         # AT는 서버 저장 필요 없음, RT만 폐기
         if rt:
             rt_h = hash_token(rt)
             await revoke_refresh_token(db, rt_h)
-            # RT 폐기 완료 후 커밋
-            await db.commit()
+        
+        # RT 폐기 완료 후 커밋
+        await db.commit()
         
         response = JSONResponse(content={"message": "로그아웃되었습니다."})
         clear_auth_cookies(response)
         return response
-        
     except Exception as e:
         await db.rollback()  # 예외 시 롤백
         # 로그아웃은 클라이언트 쿠키 삭제가 주 목적이므로 DB 실패해도 성공 반환
@@ -325,20 +338,20 @@ async def refresh_token(request: Request, db: AsyncSession = Depends(get_db)):
         rt = request.cookies.get(REFRESH_COOKIE_NAME)
         if not rt:
             raise HTTPException(status_code=401, detail="Missing refresh token")
-        
+
         # 현재 사용자 식별은 RT 기록으로 역추적
         rt_h = hash_token(rt)
         record = await get_refresh_token_record(db, rt_h)
         if not record:
             raise HTTPException(status_code=401, detail="Invalid refresh token")
-        
+
         # 트랜잭션 안전성을 위한 순서: 새 RT 생성 → 이전 RT 폐기 → 커밋
         user_id = str(record.user_id)
         new_access = create_access_token(data={"sub": user_id}, expires_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         new_refresh = secrets.token_urlsafe(64)
         new_rt_hash = hash_token(new_refresh)
         new_expires = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-        
+
         # 1. 새 RT 생성 (실패 시 이전 RT 유지됨)
         await save_refresh_token(db, user_id, new_rt_hash, new_expires, request)
         
@@ -347,12 +360,12 @@ async def refresh_token(request: Request, db: AsyncSession = Depends(get_db)):
         
         # 3. 모든 작업 완료 후 단일 커밋
         await db.commit()
-        
+
         resp = JSONResponse(content={"success": True})
         set_access_cookie(resp, new_access)
         set_refresh_cookie(resp, new_refresh)
         return resp
-        
+
     except HTTPException:
         raise
     except Exception as e:

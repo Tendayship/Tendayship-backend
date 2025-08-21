@@ -6,7 +6,7 @@ from .recipient_crud import recipient_crud
 from .subscription_crud import subscription_crud, payment_crud
 from .issue_crud import issue_crud
 from .post_crud import post_crud
-
+from .refresh_token_crud import RefreshTokenCRUD
 __all__ = [
     "BaseCRUD", 
     "user_crud", 
@@ -16,5 +16,6 @@ __all__ = [
     "subscription_crud", 
     "payment_crud",
     "issue_crud",
-    "post_crud"
+    "post_crud",
+    "RefreshTokenCRUD"
 ]

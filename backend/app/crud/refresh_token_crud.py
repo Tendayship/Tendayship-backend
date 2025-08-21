@@ -1,7 +1,7 @@
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
-from datetime import datetime, timedelta
+from datetime import datetime
 import uuid
 
 from ..models.refresh_token import RefreshToken

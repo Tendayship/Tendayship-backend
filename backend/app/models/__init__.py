@@ -15,6 +15,7 @@ from .post import Post
 from .subscription import Subscription, Payment, SubscriptionStatus, PaymentStatus
 from .book import Book, ProductionStatus, DeliveryStatus
 
+
 __all__ = [
     "Base",
     "TimestampMixin",
