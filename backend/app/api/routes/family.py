@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
 import logging
+from typing import Union
+import enum
 
 from ...database.session import get_db
 from ...api.dependencies import get_current_user
@@ -17,11 +19,27 @@ from ...core.constants import ROLE_LEADER
 from ...models.book import DeliveryStatus, ProductionStatus
 from ...services.subscription_admin_service import subscription_admin_service
 from ...schemas.recipient import RecipientCreate
-from ...models.family import RelationshipType, MemberRole 
-
+from ...models.family import RelationshipType, MemberRole
 
 router = APIRouter(prefix="/family", tags=["family"])
 logger = logging.getLogger(__name__)
+
+# 안전한 Enum/String 정규화 유틸리티 함수들
+def enum_to_str(value: Union[str, enum.Enum]) -> str:
+    """Enum 또는 문자열을 안전하게 문자열로 변환"""
+    return value.value if hasattr(value, "value") else str(value)
+
+def to_relationship_enum(value: Union[str, enum.Enum]) -> RelationshipType:
+    """문자열 또는 Enum을 RelationshipType Enum으로 안전하게 변환"""
+    if isinstance(value, RelationshipType):
+        return value
+    # Enum 값이나 문자열을 RelationshipType으로 변환
+    str_value = value.value if hasattr(value, "value") else str(value)
+    return RelationshipType(str_value)
+
+def safe_enum_value(value):
+    """응답 직렬화용 안전한 Enum 값 추출"""
+    return value.value if hasattr(value, "value") else str(value)
 
 def calculate_deadline_date(deadline_type: str) -> datetime:
     """다음 달의 해당 일요일 계산"""
@@ -39,8 +57,7 @@ def calculate_deadline_date(deadline_type: str) -> datetime:
     if deadline_type == "SECOND_SUNDAY":
         return first_sunday + timedelta(days=7)  # 둘째 주 일요일
     else:  # FOURTH_SUNDAY
-        return first_sunday + timedelta(days=21) 
-    
+        return first_sunday + timedelta(days=21)
 
 @router.post("/setup", response_model=dict)
 async def setup_family_group(
@@ -70,8 +87,8 @@ async def setup_family_group(
         # 3. 그룹 생성 스키마 생성
         group_create_data = FamilyGroupCreate(
             group_name=setup_data.group_name,
-            deadline_type=setup_data.deadline_type,  # Enum은 자동 변환
-            leader_relationship=setup_data.leader_relationship,  # Enum은 자동 변환
+            deadline_type=setup_data.deadline_type,  # Pydantic이 자동 처리
+            leader_relationship=setup_data.leader_relationship,  # Pydantic이 자동 처리
             recipient_info=recipient_info
         )
         
@@ -89,25 +106,26 @@ async def setup_family_group(
         }
         db_recipient = await recipient_crud.create(db, recipient_data)
         
-        # 6. 첫 회차 생성
-        deadline_date = calculate_deadline_date(setup_data.deadline_type.value)
+        # 6. 첫 회차 생성 - 안전한 문자열 변환
+        deadline_str = enum_to_str(setup_data.deadline_type)
+        deadline_date = calculate_deadline_date(deadline_str)
         issue_data = {
             "group_id": db_group.id,  # UUID 그대로 유지
             "issue_number": 1,
             "deadline_date": deadline_date.date(),
-            "status": "OPEN"  # 상수 사용 또는 Enum 확인 필요
+            "status": "OPEN"  # 문자열 상수 사용
         }
         db_issue = await issue_crud.create(db, issue_data)
         
-        # 7. 리더 멤버 추가 - Enum 변환
-        relationship_enum = RelationshipType(setup_data.leader_relationship.value)
+        # 7. 리더 멤버 추가 - 안전한 Enum 변환
+        relationship_enum = to_relationship_enum(setup_data.leader_relationship)
         await family_member_crud.create_member(
             db=db,
             user_id=current_user.id,
             group_id=db_group.id,
             recipient_id=db_recipient.id,
             relationship=relationship_enum,
-            role=MemberRole.LEADER  # 상수 대신 Enum 사용
+            role=MemberRole.LEADER  # Enum 직접 사용
         )
         
         await db.commit()
@@ -119,8 +137,8 @@ async def setup_family_group(
                 "id": str(db_group.id),
                 "group_name": db_group.group_name,
                 "invite_code": db_group.invite_code,
-                "deadline_type": db_group.deadline_type.value if hasattr(db_group.deadline_type, 'value') else str(db_group.deadline_type),
-                "status": db_group.status.value if hasattr(db_group.status, 'value') else str(db_group.status)
+                "deadline_type": safe_enum_value(db_group.deadline_type),
+                "status": safe_enum_value(db_group.status)
             },
             "recipient": {
                 "id": str(db_recipient.id),
@@ -132,7 +150,7 @@ async def setup_family_group(
                 "id": str(db_issue.id),
                 "issue_number": db_issue.issue_number,
                 "deadline_date": db_issue.deadline_date.isoformat(),
-                "status": db_issue.status.value if hasattr(db_issue.status, 'value') else str(db_issue.status)
+                "status": safe_enum_value(db_issue.status)
             }
         }
         
@@ -149,6 +167,7 @@ async def get_my_recipient(
     db: AsyncSession = Depends(get_db)
 ):
     """현재 사용자가 속한 그룹의 받는 분 정보 조회"""
+    
     membership = await family_member_crud.check_user_membership(db, current_user.id)
     if not membership:
         return {"recipient": None, "group_id": None, "message": "속한 가족 그룹이 없습니다"}
@@ -179,6 +198,7 @@ async def get_my_recipient(
         "created_at": recipient.created_at.isoformat() if hasattr(recipient, 'created_at') else None,
         "updated_at": recipient.updated_at.isoformat() if hasattr(recipient, 'updated_at') else None
     }
+
     return {"recipient": recipient_data, "group_id": str(membership.group_id)}
 
 @router.post("/create", response_model=FamilyGroupResponse)
@@ -188,6 +208,7 @@ async def create_family_group(
     db: AsyncSession = Depends(get_db)
 ):
     """가족 그룹 생성 (리더만 가능)"""
+    
     existing_membership = await family_member_crud.check_user_membership(db, current_user.id)
     if existing_membership:
         raise HTTPException(
@@ -198,27 +219,29 @@ async def create_family_group(
     try:
         # 받는 분 생성
         db_recipient = await recipient_crud.create(db, group_data.recipient_info)
-
+        
         # 그룹 생성
         db_group = await family_group_crud.create_with_leader(db, group_data, current_user.id)
-
+        
         # 받는 분에 group_id 설정
         db_recipient.group_id = db_group.id
-
-        # 리더 멤버 추가
+        
+        # 리더 멤버 추가 - 안전한 Enum 변환
+        relationship_enum = to_relationship_enum(group_data.leader_relationship)
         await family_member_crud.create_member(
             db=db,
             user_id=current_user.id,
             group_id=db_group.id,
             recipient_id=db_recipient.id,
-            relationship=group_data.leader_relationship,
-            role=ROLE_LEADER
+            relationship=relationship_enum,
+            role=MemberRole.LEADER
         )
-
+        
         await db.commit()
         await db.refresh(db_group)
+        
         return db_group
-
+        
     except Exception as e:
         await db.rollback()
         raise HTTPException(
@@ -232,9 +255,11 @@ async def get_my_family_group(
     db: AsyncSession = Depends(get_db)
 ):
     """현재 사용자가 속한 가족 그룹 조회"""
+    
     group = await family_group_crud.get_by_user_id(db, current_user.id)
     if not group:
         return {"group": None, "message": "속한 가족 그룹이 없습니다"}
+    
     return {"group": group}
 
 @router.post("/{group_id}/regenerate-invite")
@@ -244,8 +269,9 @@ async def regenerate_invite_code(
     db: AsyncSession = Depends(get_db)
 ):
     """초대 코드 재생성 (리더만 가능)"""
+    
     member = await family_member_crud.get_by_user_and_group(db, current_user.id, group_id)
-    if not member or getattr(member, "role", None) != ROLE_LEADER:
+    if not member or safe_enum_value(getattr(member, "role", None)) != ROLE_LEADER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="그룹 리더만 초대 코드를 재생성할 수 있습니다"
@@ -254,6 +280,7 @@ async def regenerate_invite_code(
     new_invite_code = family_group_crud._generate_invite_code()
     group = await family_group_crud.get(db, group_id)
     group.invite_code = new_invite_code
+    
     await db.commit()
     return {"invite_code": new_invite_code}
 
@@ -263,14 +290,8 @@ async def delete_my_family_group(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    내 가족 그룹 완전 삭제 (리더 전용)
-    1) 리더 권한 확인
-    2) 배송/제작 진행 상태 점검
-    3) 활성 구독 취소 및 환불 시도
-    4) 구독 데이터 삭제
-    5) 그룹 삭제 (cascade로 연관 데이터 자동 삭제)
-    """
+    """내 가족 그룹 완전 삭제 (리더 전용)"""
+    
     # 1) 멤버십 및 리더 권한 확인
     membership = await family_member_crud.check_user_membership(db, current_user.id)
     if not membership:
@@ -278,9 +299,10 @@ async def delete_my_family_group(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="속한 가족 그룹이 없습니다"
         )
-    
+
     group_id = str(membership.group_id)
-    role_value = membership.role.value if hasattr(membership.role, "value") else str(membership.role)
+    role_value = safe_enum_value(membership.role)
+    
     if role_value != ROLE_LEADER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -293,6 +315,7 @@ async def delete_my_family_group(
         (b.delivery_status == DeliveryStatus.SHIPPING or b.production_status == ProductionStatus.IN_PROGRESS)
         for b in pending_books
     )
+
     if has_shipping_or_inprogress and not force:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -315,16 +338,17 @@ async def delete_my_family_group(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="그룹을 찾을 수 없습니다"
             )
-        await db.commit()
 
+        await db.commit()
         logger.info(f"그룹 삭제 완료 - group_id: {group_id}, user_id: {current_user.id}")
+
         return {
             "message": "가족 그룹이 완전히 삭제되었습니다",
             "subscription_cancel": cancel_info,
             "subscription_deleted": bool(deleted_subscriptions),
             "pending_books_count": len(pending_books)
         }
-        
+
     except HTTPException:
         await db.rollback()
         raise

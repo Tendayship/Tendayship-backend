@@ -24,8 +24,8 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
         """리더와 함께 가족 그룹 생성"""
         invite_code = self._generate_invite_code()
         
-        # Enum 값 변환 처리
-        deadline_type_value = group_data.deadline_type.value if hasattr(group_data.deadline_type, 'value') else group_data.deadline_type
+        # Enum 값 변환 처리 - 안전한 방식
+        deadline_type_value = group_data.deadline_type.value if hasattr(group_data.deadline_type, 'value') else str(group_data.deadline_type)
         
         db_group = FamilyGroup(
             group_name=group_data.group_name,
@@ -37,7 +37,6 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
         
         db.add(db_group)
         return db_group
-
 
     async def get_by_invite_code(self, db: AsyncSession, invite_code: str) -> Optional[FamilyGroup]:
         result = await db.execute(
@@ -110,6 +109,7 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
         current_issues = {str(issue.group_id): issue for issue in current_issues_result.scalars().all()}
 
         issue_ids = [issue.id for issue in current_issues.values()]
+
         posts_count = {}
         if issue_ids:
             posts_count_query = (
@@ -139,7 +139,6 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
             )
             .group_by(Issue.group_id)
         )
-
         pending_books_result = await db.execute(pending_books_query)
         pending_books_count = {str(row.group_id): row.pending_books_count for row in pending_books_result.fetchall()}
 
@@ -147,6 +146,7 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
         for group in groups:
             group_id_str = str(group.id)
             current_issue = current_issues.get(group_id_str)
+
             current_issue_posts = 0
             if current_issue:
                 current_issue_posts = posts_count.get(str(current_issue.id), 0)
