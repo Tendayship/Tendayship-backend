@@ -3,8 +3,8 @@ from datetime import datetime
 from pydantic import BaseModel, Field, validator, model_validator
 
 class PostCreate(BaseModel):
+    """통합 소식 생성 스키마 - 로컬 이미지 업로드 전용"""
     content: Optional[str] = Field(None, min_length=50, max_length=100, description="소식 내용 (선택)")
-    image_urls: List[str] = Field(..., min_items=1, max_items=4, description="이미지 URL 목록 (필수)")
 
     @validator('content')
     def validate_content(cls, v):
@@ -16,16 +16,10 @@ class PostCreate(BaseModel):
         if len(v) > 100:
             raise ValueError('소식 내용은 최대 100자까지 가능합니다')
         return v
-    
-    @validator('image_urls')
-    def validate_image_urls(cls, v):
-        if not v or len(v) == 0:
-            raise ValueError('최소 1장의 이미지가 필요합니다')
-        if len(v) > 4:
-            raise ValueError('최대 4개의 이미지만 업로드 가능합니다')
-        return v
 
+# Deprecated - 호환성 유지를 위해 남겨둠
 class PostCreateWithImages(BaseModel):
+    """⚠️ DEPRECATED: PostCreate + 파일 업로드 사용 권장"""
     content: Optional[str] = Field(None, min_length=50, max_length=100, description="소식 내용 (선택)")
     image_urls: List[str] = Field(..., min_items=1, max_items=4, description="이미지 URL 목록 (필수)")
     image_blob_keys: List[str] = Field(..., min_items=1, max_items=4, description="이미지 블롭 키 목록 (필수)")
