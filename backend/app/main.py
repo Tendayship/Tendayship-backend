@@ -20,15 +20,9 @@ def _get_allowed_origins_set() -> set[str]:
     """허용된 오리진 목록을 집합으로 반환"""
     origins = set()
     try:
-        # CORSMiddleware에 설정된 오리진들
+        # CORSMiddleware에 설정된 오리진들 - 프로덕션 전용
         origins.update([
-            "https://kind-sky-0070e521e.2.azurestaticapps.net",
-            "http://localhost:3000",
-            "http://127.0.0.1:3000", 
-            "http://localhost:8000",
-            "http://127.0.0.1:8000",
-            "http://localhost:5173",
-            "http://127.0.0.1:5173"
+            "https://kind-sky-0070e521e.2.azurestaticapps.net"
         ])
         # FRONTEND_URL도 추가
         if getattr(settings, "FRONTEND_URL", None):
@@ -168,13 +162,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://kind-sky-0070e521e.2.azurestaticapps.net",
-        "http://localhost:3000", # 개발용 유지
-        "http://127.0.0.1:3000", # 개발용 유지
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173"
+        "https://kind-sky-0070e521e.2.azurestaticapps.net"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],

@@ -12,13 +12,7 @@ def _get_allowed_origins_set() -> set[str]:
     origins = set()
     try:
         origins.update([
-            "https://kind-sky-0070e521e.2.azurestaticapps.net",
-            "http://localhost:3000",
-            "http://127.0.0.1:3000", 
-            "http://localhost:8000",
-            "http://127.0.0.1:8000",
-            "http://localhost:5173",
-            "http://127.0.0.1:5173"
+            "https://kind-sky-0070e521e.2.azurestaticapps.net"
         ])
         if getattr(settings, "FRONTEND_URL", None):
             origins.add(settings.FRONTEND_URL)

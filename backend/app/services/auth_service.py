@@ -16,7 +16,7 @@ class KakaoOAuthService:
     def __init__(self):
         self.client_id = settings.KAKAO_CLIENT_ID
         self.redirect_uri = settings.KAKAO_REDIRECT_URI
-        self.frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
+        self.frontend_url = getattr(settings, 'FRONTEND_URL', 'https://kind-sky-0070e521e.2.azurestaticapps.net')
         self.token_url = "https://kauth.kakao.com/oauth/token"
         self.user_info_url = "https://kapi.kakao.com/v2/user/me"
     

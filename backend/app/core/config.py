@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     # 기본 애플리케이션 설정
     APP_NAME: str = "Family News Service"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
 
     # 관리자 설정 - 환경변수에서 쉼표 구분 문자열로 받음
     ADMIN_EMAILS: List[str] = Field(
@@ -185,7 +185,7 @@ class Settings(BaseSettings):
 
     # 결제 모드
     PAYMENT_MODE: str = Field(
-        default="TEST",
+        default="PRODUCTION",
         env="PAYMENT_MODE",
         description="TEST or PRODUCTION"
     )
@@ -198,7 +198,7 @@ class Settings(BaseSettings):
 
     # 프론트엔드 URL
     FRONTEND_URL: str = Field(
-        default="http://localhost:3000",
+        default="https://kind-sky-0070e521e.2.azurestaticapps.net",
         env="FRONTEND_URL",
         description="프론트엔드 URL"
     )
