@@ -70,11 +70,6 @@ async def create_post(
         # 5. 텍스트 선택 검증 (있는 경우만)
         if content:
             content_length = len(content.strip())
-            if content_length < 50:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"소식 내용은 최소 50자 이상이어야 합니다 (현재: {content_length}자)"
-                )
             if content_length > 100:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -188,11 +183,6 @@ async def create_post_with_images(
         # 5. 텍스트 선택 검증 (있는 경우만)
         if post_data.content:
             content_length = len(post_data.content.strip())
-            if content_length < 50:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"소식 내용은 최소 50자 이상이어야 합니다 (현재: {content_length}자)"
-                )
             if content_length > 100:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

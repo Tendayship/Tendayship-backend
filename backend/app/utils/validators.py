@@ -24,14 +24,11 @@ def validate_invite_code(invite_code: str) -> bool:
     return bool(re.match(r'^[A-Z0-9]{8}$', invite_code))
 
 def validate_post_content(content: str) -> tuple[bool, Optional[str]]:
-    """소식 내용 검증"""
+    """소식 내용 검증 - 내용이 있는 경우만 길이 검증"""
     if not content or not content.strip():
-        return False, "내용을 입력해주세요"
+        return True, None  # 빈 내용도 허용 (텍스트는 선택사항)
     
     content_length = len(content.strip())
-    if content_length < 50:
-        return False, f"내용은 최소 50자 이상 입력해주세요 (현재: {content_length}자)"
-    
     if content_length > 100:
         return False, f"내용은 최대 100자까지 입력 가능합니다 (현재: {content_length}자)"
     

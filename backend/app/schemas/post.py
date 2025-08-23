@@ -4,15 +4,13 @@ from pydantic import BaseModel, Field, validator, model_validator
 
 class PostCreate(BaseModel):
     """통합 소식 생성 스키마 - 로컬 이미지 업로드 전용"""
-    content: Optional[str] = Field(None, min_length=50, max_length=100, description="소식 내용 (선택)")
+    content: Optional[str] = Field(None, max_length=100, description="소식 내용 (선택)")
 
     @validator('content')
     def validate_content(cls, v):
         if v is None:
             return v
         v = v.strip()
-        if len(v) < 50:
-            raise ValueError('소식 내용은 최소 50자 이상이어야 합니다')
         if len(v) > 100:
             raise ValueError('소식 내용은 최대 100자까지 가능합니다')
         return v
@@ -20,7 +18,7 @@ class PostCreate(BaseModel):
 # Deprecated - 호환성 유지를 위해 남겨둠
 class PostCreateWithImages(BaseModel):
     """⚠️ DEPRECATED: PostCreate + 파일 업로드 사용 권장"""
-    content: Optional[str] = Field(None, min_length=50, max_length=100, description="소식 내용 (선택)")
+    content: Optional[str] = Field(None, max_length=100, description="소식 내용 (선택)")
     image_urls: List[str] = Field(..., min_items=1, max_items=4, description="이미지 URL 목록 (필수)")
     image_blob_keys: List[str] = Field(..., min_items=1, max_items=4, description="이미지 블롭 키 목록 (필수)")
 
@@ -29,8 +27,6 @@ class PostCreateWithImages(BaseModel):
         if v is None:
             return v
         v = v.strip()
-        if len(v) < 50:
-            raise ValueError('소식 내용은 최소 50자 이상이어야 합니다')
         if len(v) > 100:
             raise ValueError('소식 내용은 최대 100자까지 가능합니다')
         return v
@@ -62,7 +58,7 @@ class PostCreateWithImages(BaseModel):
         return values
 
 class PostUpdate(BaseModel):
-    content: Optional[str] = Field(None, min_length=50, max_length=100)
+    content: Optional[str] = Field(None, max_length=100)
     image_urls: Optional[List[str]] = Field(None, min_items=1, max_items=4)
 
 class PostResponse(BaseModel):
