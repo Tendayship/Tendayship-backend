@@ -31,7 +31,7 @@ def _cookie_common_kwargs() -> dict:
     return {
         "httponly": True,
         "secure": not settings.DEBUG,
-        "samesite": "Lax",
+        "samesite": "None" if not settings.DEBUG else "Lax",
     }
 
 def set_access_cookie(response, token: str):
