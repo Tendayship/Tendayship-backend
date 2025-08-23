@@ -70,12 +70,25 @@ async def init_db():
     """
     try:
         async with engine.begin() as conn:
+            # PostgreSQL UUID 확장 활성화 (UUID 필드 사용을 위해 필요)
+            try:
+                await conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'))
+                logger.info("UUID extension enabled successfully")
+            except Exception as ext_error:
+                logger.warning(f"Could not enable UUID extension (might already exist): {ext_error}")
+            
             # 모든 테이블 생성
             # 주의: 프로덕션에서는 Alembic 마이그레이션을 사용하세요
             await conn.run_sync(Base.metadata.create_all)
             logger.info("Database tables created successfully")
+            
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
+        logger.error("This might be due to:")
+        logger.error("1. Database connection issues")
+        logger.error("2. Missing permissions to create extensions/tables")
+        logger.error("3. UUID extension not available")
+        logger.error("4. Table conflicts or constraint violations")
         raise
 
 
@@ -99,4 +112,41 @@ async def check_db_connection():
             return result.scalar() == 1
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
+        return False
+
+
+async def validate_db_setup():
+    """
+    데이터베이스 설정 및 필수 확장 유효성 검사
+    """
+    try:
+        async with AsyncSessionLocal() as session:
+            # 1. 기본 연결 테스트
+            await session.execute(text("SELECT 1"))
+            logger.info("✓ Database connection successful")
+            
+            # 2. UUID 확장 확인
+            try:
+                result = await session.execute(text("SELECT uuid_generate_v4()"))
+                uuid_test = result.scalar()
+                if uuid_test:
+                    logger.info("✓ UUID extension is working")
+            except Exception as uuid_error:
+                logger.error(f"✗ UUID extension test failed: {uuid_error}")
+                raise
+                
+            # 3. 데이터베이스 권한 확인 (테이블 생성 권한)
+            try:
+                await session.execute(text("CREATE TABLE IF NOT EXISTS _test_permissions_check (id INTEGER)"))
+                await session.execute(text("DROP TABLE IF EXISTS _test_permissions_check"))
+                logger.info("✓ Database permissions are sufficient")
+            except Exception as perm_error:
+                logger.error(f"✗ Insufficient database permissions: {perm_error}")
+                raise
+                
+            await session.commit()
+            return True
+            
+    except Exception as e:
+        logger.error(f"Database setup validation failed: {e}")
         return False

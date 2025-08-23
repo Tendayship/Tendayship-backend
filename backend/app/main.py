@@ -80,10 +80,19 @@ async def lifespan(app: FastAPI):
     
     # 데이터베이스 초기화
     try:
-        await init_db()
-        logger.info("데이터베이스 초기화 성공")
+        # 데이터베이스 설정 검증
+        from .database.session import validate_db_setup
+        db_validation = await validate_db_setup()
+        if not db_validation:
+            logger.error("데이터베이스 설정 검증 실패 - 초기화를 중단합니다")
+            # 검증 실패해도 애플리케이션은 계속 실행 (연결은 나중에 복구될 수 있음)
+        else:
+            # 검증 성공시에만 테이블 생성
+            await init_db()
+            logger.info("데이터베이스 초기화 성공")
     except Exception as e:
         logger.error(f"데이터베이스 초기화 실패: {str(e)}")
+        logger.error("애플리케이션은 계속 실행되지만 데이터베이스 기능이 제한될 수 있습니다")
     
     # Azure Storage 초기화
     try:
