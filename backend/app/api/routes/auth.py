@@ -15,6 +15,7 @@ from ...models.user import User
 from ...crud.user_crud import user_crud
 from ...crud.refresh_token_crud import refresh_token_crud
 from ...core.config import settings
+from ...utils.validators import sanitize_return_url
 import logging
 import uuid
 
@@ -117,22 +118,26 @@ async def kakao_oauth_callback(
     code: Optional[str] = None,
     error: Optional[str] = None,
     error_description: Optional[str] = None,
+    state: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
 ):
     """카카오 OAuth 콜백 처리 - 프론트 콜백 페이지로 리다이렉트"""
+    # state 검증 및 정리
+    cleaned_state = sanitize_return_url(state) if state else "/"
+    
     # 에러 처리
     if error:
         error_msg = error_description or error
         logger.error(f"OAuth error received: {error} - {error_description}")
         return RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason={error}",
+            url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason={error}&state={cleaned_state}",
             status_code=302
         )
 
     if not code:
         logger.error("No authorization code received")
         return RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason=no_code",
+            url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason=no_code&state={cleaned_state}",
             status_code=302
         )
 
@@ -146,7 +151,7 @@ async def kakao_oauth_callback(
         if not await kakao_oauth_service.verify_kakao_account(kakao_user_info):
             logger.warning("Account verification failed")
             return RedirectResponse(
-                url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason=invalid_account",
+                url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason=invalid_account&state={cleaned_state}",
                 status_code=302
             )
 
@@ -171,7 +176,7 @@ async def kakao_oauth_callback(
         await db.commit()
 
         response = RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/auth/callback/success",
+            url=f"{settings.FRONTEND_URL}/auth/callback/success?state={cleaned_state}",
             status_code=302
         )
         
@@ -183,7 +188,7 @@ async def kakao_oauth_callback(
         logger.error(f"OAuth callback failed: {str(e)}", exc_info=True)
         await db.rollback()  # 예외 시 롤백으로 일관성 보장
         return RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason=server_error",
+            url=f"{settings.FRONTEND_URL}/auth/callback/fail?reason=server_error&state={cleaned_state}",
             status_code=302
         )
 
@@ -256,8 +261,11 @@ async def kakao_login(
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/kakao/url")
-async def get_kakao_login_url():
+async def get_kakao_login_url(state: Optional[str] = None):
     """카카오 로그인 URL 생성"""
+    # state 검증 및 정리 (returnUrl 용도)
+    cleaned_state = sanitize_return_url(state) if state else "/"
+    
     # 카카오 OAuth 스코프는 앱 설정에서 활성화되어야 함
     # account_email 스코프가 앱에서 비활성화된 경우 기본 정보만 요청
     kakao_login_url = (
@@ -265,7 +273,7 @@ async def get_kakao_login_url():
         f"?client_id={kakao_oauth_service.client_id}"
         f"&redirect_uri={kakao_oauth_service.redirect_uri}"
         f"&response_type=code"
-        f"&state=random_state_string"  # CSRF 방지
+        f"&state={cleaned_state}"  # returnUrl을 state로 전달
     )
     return {"login_url": kakao_login_url}
 

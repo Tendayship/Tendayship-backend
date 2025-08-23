@@ -96,6 +96,55 @@ def validate_group_name(group_name: str) -> tuple[bool, Optional[str]]:
     
     return True, None
 
+def sanitize_return_url(value: str) -> str:
+    """
+    returnUrl(state) 검증 및 정리 함수
+    
+    보안 규칙:
+    1. 상대 경로만 허용 ('/'로 시작)
+    2. '//'로 시작하는 scheme-relative URL 차단
+    3. 길이 제한 (최대 1024자)
+    4. 프로토콜이 포함된 절대 URL 차단
+    5. 부적합 시 기본값 '/' 반환
+    
+    Args:
+        value: 검증할 returnUrl 값
+        
+    Returns:
+        검증 및 정리된 상대 경로 URL
+    """
+    if not value or not isinstance(value, str):
+        return "/"
+    
+    value = value.strip()
+    
+    # 상대 경로만 허용 ('/'로 시작해야 함)
+    if not value.startswith("/"):
+        return "/"
+    
+    # scheme-relative URL 차단 ('//'로 시작)
+    if value.startswith("//"):
+        return "/"
+    
+    # 절대 URL 차단 (프로토콜 포함)
+    forbidden_prefixes = ["http://", "https://", "javascript:", "data:", "ftp://"]
+    value_lower = value.lower()
+    for prefix in forbidden_prefixes:
+        if prefix in value_lower:
+            return "/"
+    
+    # 길이 제한
+    if len(value) > 1024:
+        value = value[:1024]
+    
+    # 제어 문자 및 위험한 문자 제거
+    dangerous_chars = ['\n', '\r', '\t', '\0']
+    for char in dangerous_chars:
+        value = value.replace(char, '')
+    
+    return value
+
+
 class ValidationError(Exception):
     """검증 오류 커스텀 예외"""
     def __init__(self, message: str, field: Optional[str] = None):

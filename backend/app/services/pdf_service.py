@@ -48,8 +48,9 @@ class PDFGenerationService:
                 .order_by(Post.created_at.desc())
             )
             posts = posts_result.scalars().unique().all()
-            if not posts:
-                raise ValueError(f"회차에 소식이 없습니다: {issue_id}")
+            
+            # 소식이 없어도 진행 (빈 책자 생성 가능)
+            logger.info(f"회차 {issue_id}에 {len(posts)}개의 소식이 있습니다.")
 
             # 3. 받는 분 검증 (이미 eager load 되었음)
             recipient = issue.group.recipient if issue.group else None
@@ -67,15 +68,44 @@ class PDFGenerationService:
                         None
                     )
 
-                post_data.append({
-                    'content': post.content,
-                    'image_urls': post.image_urls or [],
+                # 관계 정보 추출
+                relationship = "가족"
+                if author_member:
+                    if hasattr(author_member, "member_relationship"):
+                        rel = author_member.member_relationship
+                        if hasattr(rel, "value"):
+                            relationship = rel.value
+                        else:
+                            relationship = str(rel)
+
+                # 작성자 이름 추출
+                author_name = "작성자"
+                if post.author:
+                    author_name = getattr(post.author, "name", "작성자")
+
+                # 게시물 데이터 구성 (프로필 이미지 제외)
+                post_item = {
+                    'content': post.content,  # None일 수 있음 (텍스트 선택)
+                    'image_urls': post.image_urls or [],  # 최소 1장은 보장됨
                     'created_at': post.created_at,
-                    'author_name': getattr(post.author, "name", None) if post.author else None,
-                    'author_relationship': getattr(getattr(author_member, "relationship", None), "value", None) or "가족"
-                })
+                    'author_name': author_name,
+                    'author_relationship': relationship
+                    # 'author_profile_image' 제외
+                }
+                post_data.append(post_item)
 
             # 5. PDF 생성
+            if not post_data:
+                # 소식이 없는 경우 빈 페이지 생성
+                logger.warning(f"회차 {issue_id}에 소식이 없습니다. 빈 PDF를 생성합니다.")
+                post_data = [{
+                    'content': '이번 회차에는 아직 소식이 없습니다.',
+                    'image_urls': [],
+                    'created_at': datetime.now(),
+                    'author_name': '시스템',
+                    'author_relationship': '관리자'
+                }]
+
             pdf_bytes = pdf_generator.generate_pdf(
                 recipient_name=recipient.name,
                 issue_number=issue.issue_number,
@@ -86,8 +116,8 @@ class PDFGenerationService:
             # 6. Azure Blob Storage에 업로드
             storage_service = get_storage_service()
             pdf_url = storage_service.upload_book_pdf(
-                issue.group_id,
-                issue_id,
+                str(issue.group_id),
+                str(issue_id),
                 pdf_bytes,
                 f"book_{issue.issue_number}.pdf"
             )
@@ -101,6 +131,7 @@ class PDFGenerationService:
                 existing_book.produced_at = datetime.now()
                 await db.commit()
                 book_id = existing_book.id
+                logger.info(f"기존 책자 업데이트: book_id={book_id}")
             else:
                 # 새 책자 생성
                 book_data = {
@@ -112,8 +143,9 @@ class PDFGenerationService:
                 new_book = await book_crud.create(db, book_data)
                 await db.commit()
                 book_id = new_book.id
+                logger.info(f"새 책자 생성: book_id={book_id}")
 
-            logger.info(f"PDF 생성 완료: issue_id={issue_id}, book_id={book_id}")
+            logger.info(f"PDF 생성 완료: issue_id={issue_id}, book_id={book_id}, url={pdf_url}")
             return pdf_url
 
         except Exception as e:
@@ -130,6 +162,7 @@ class PDFGenerationService:
         if not book:
             raise ValueError(f"책자를 찾을 수 없습니다: {book_id}")
         
+        logger.info(f"PDF 재생성 시작: book_id={book_id}, issue_id={book.issue_id}")
         return await self.generate_issue_pdf(db, book.issue_id)
 
 # 싱글톤 인스턴스

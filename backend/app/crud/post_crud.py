@@ -1,5 +1,5 @@
 import logging
-from typing import List
+from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func, desc
 from sqlalchemy.orm import joinedload
@@ -22,27 +22,42 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
         image_urls: List[str] = None,
         image_blob_keys: List[str] = None
     ) -> Post:
-        """새 소식 작성"""
-        # 안전한 image_urls 접근
+        """새 소식 작성 (텍스트 선택, 이미지 필수)"""
+        
+        # 이미지 URL 처리 (필수)
         if image_urls is None:
             image_urls = getattr(post_data, 'image_urls', [])
-            if image_urls is None:
-                image_urls = []
         
-        # 안전한 image_blob_keys 접근
+        if not image_urls:
+            raise ValueError("최소 1장의 이미지가 필요합니다")
+        
+        # 이미지 blob keys 처리
         if image_blob_keys is None:
-            image_blob_keys = []
+            image_blob_keys = getattr(post_data, 'image_blob_keys', [])
+            if image_blob_keys is None:
+                image_blob_keys = []
         
+        # 텍스트 내용 처리 (선택)
+        content = getattr(post_data, 'content', None)
+        if content:
+            content = content.strip()
+            # 50~100자 검증 (스키마에서 이미 처리되지만 추가 확인)
+            if len(content) < 50 or len(content) > 100:
+                raise ValueError(f"소식 내용은 50~100자여야 합니다 (현재: {len(content)}자)")
+        
+        # Post 생성
         db_post = Post(
             issue_id=issue_id,
             author_id=author_id,
-            content=post_data.content,
+            content=content,  # None일 수 있음
             image_urls=image_urls,
             image_blob_keys=image_blob_keys
         )
         
         db.add(db_post)
         # Transaction management moved to upper layer
+        logger.info(f"소식 생성: author_id={author_id}, issue_id={issue_id}, has_content={bool(content)}, image_count={len(image_urls)}")
+        
         return db_post
 
     async def get_posts_by_issue(
@@ -63,10 +78,16 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
                 .limit(limit)
                 .distinct()
             )
-            return result.scalars().unique().all()
+            posts = result.scalars().unique().all()
+            
+            # 로깅 추가
+            for post in posts:
+                logger.debug(f"Post {post.id}: content={'있음' if post.content else '없음'}, images={len(post.image_urls or [])}")
+            
+            return posts
             
         except Exception as e:
-            # Exception propagated to upper layer
+            logger.error(f"회차별 소식 조회 실패: {str(e)}")
             raise e
 
     async def count_posts_by_issue(
@@ -83,8 +104,32 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
             return result.scalar() or 0
             
         except Exception as e:
-            # Exception propagated to upper layer
+            logger.error(f"소식 개수 조회 실패: {str(e)}")
             raise e
+
+    async def validate_post_content(
+        self,
+        content: Optional[str],
+        image_urls: List[str]
+    ) -> tuple[bool, Optional[str]]:
+        """소식 내용 검증 (새 요구사항)"""
+        
+        # 이미지 필수 검증
+        if not image_urls or len(image_urls) == 0:
+            return False, "최소 1장의 이미지가 필요합니다"
+        
+        if len(image_urls) > 4:
+            return False, "최대 4장의 이미지만 업로드 가능합니다"
+        
+        # 텍스트 선택 검증
+        if content is not None:
+            content = content.strip()
+            if len(content) < 50:
+                return False, f"소식 내용은 최소 50자 이상이어야 합니다 (현재: {len(content)}자)"
+            if len(content) > 100:
+                return False, f"소식 내용은 최대 100자까지 가능합니다 (현재: {len(content)}자)"
+        
+        return True, None
 
     async def get_posts_by_group(
         self,
@@ -111,6 +156,7 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
                 
                 # 검증 실패 시 빈 리스트 반환
                 if not verified_issue_ids:
+                    logger.warning(f"그룹 {group_id}에 속하지 않는 회차 ID가 포함되어 있습니다")
                     return []
                 
                 # 검증된 issue_ids만 사용
@@ -163,15 +209,20 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
             return result.scalars().all()
             
         except Exception as e:
+            logger.error(f"사용자 소식 조회 실패: {str(e)}")
             return []
+    
     async def delete(self, db: AsyncSession, post_id: str):
-            """게시글(Post) DB에서 삭제"""
-            post = await db.get(Post, post_id)
-            if post is None:
-                return False   # posts.py에서 404 예외 발생
-            await db.delete(post)
-            await db.commit()
-            return True
+        """게시글(Post) DB에서 삭제"""
+        post = await db.get(Post, post_id)
+        if post is None:
+            return False
+        
+        logger.info(f"소식 삭제: post_id={post_id}, had_content={bool(post.content)}, image_count={len(post.image_urls or [])}")
+        
+        await db.delete(post)
+        await db.commit()
+        return True
     
     async def get_posts_by_issue_with_author(self, db: AsyncSession, issue_id: str, limit: int = 20, offset: int = 0):
         """이슈의 포스트를 작성자 정보와 함께 조회 (관리자용 피드에서 사용)"""
@@ -183,7 +234,13 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
             .limit(limit)
             .offset(offset)
         )
-        return result.scalars().all()
+        posts = result.scalars().all()
+        
+        # 디버깅 정보
+        for post in posts:
+            logger.debug(f"Admin view - Post {post.id}: content={'있음' if post.content else '없음'}, images={len(post.image_urls or [])}")
+        
+        return posts
 
 # 싱글톤 인스턴스
 post_crud = PostCRUD(Post)
