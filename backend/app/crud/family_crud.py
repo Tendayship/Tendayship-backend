@@ -1,9 +1,11 @@
 from typing import Optional, List
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
 from sqlalchemy.orm import selectinload, joinedload
 import secrets
 import string
+
 from .base import BaseCRUD
 from ..models.family import FamilyGroup, FamilyMember
 from ..models.issue import Issue, IssueStatus
@@ -17,26 +19,24 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
     async def create_with_leader(
         self,
         db: AsyncSession,
-        group_data: FamilyGroupCreate,  # 타입 명시
+        group_data: FamilyGroupCreate,
         leader_id: str
     ) -> FamilyGroup:
-        """리더와 함께 가족 그룹 생성"""
         invite_code = self._generate_invite_code()
-
-        # Enum 값 변환 처리 - 안전한 방식
+        
         deadline_type_value = group_data.deadline_type.value if hasattr(group_data.deadline_type, 'value') else str(group_data.deadline_type)
 
         db_group = FamilyGroup(
             group_name=group_data.group_name,
             leader_id=leader_id,
             invite_code=invite_code,
-            deadline_type=deadline_type_value,  # 문자열 값으로 변환
+            deadline_type=deadline_type_value,
             status=GROUP_STATUS_ACTIVE
         )
 
         db.add(db_group)
-        await db.flush()  # INSERT를 DB로 보내고 PK(ID)를 채움
-        await db.refresh(db_group)  # ID를 ORM 객체에 반영
+        await db.flush()
+        await db.refresh(db_group)
         return db_group
 
     async def get_by_invite_code(self, db: AsyncSession, invite_code: str) -> Optional[FamilyGroup]:
@@ -65,7 +65,6 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
         return result.scalars().first()
 
     async def get_with_relations(self, db: AsyncSession, group_id: str) -> Optional[FamilyGroup]:
-        """관계를 포함한 그룹 조회 (관리자용 피드에서 사용)"""
         result = await db.execute(
             select(FamilyGroup)
             .where(FamilyGroup.id == group_id)
@@ -106,6 +105,7 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
                 )
             )
         )
+
         current_issues_result = await db.execute(current_issues_query)
         current_issues = {str(issue.group_id): issue for issue in current_issues_result.scalars().all()}
 
@@ -121,6 +121,7 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
                 .where(Post.issue_id.in_([str(issue_id) for issue_id in issue_ids]))
                 .group_by(Post.issue_id)
             )
+
             posts_count_result = await db.execute(posts_count_query)
             posts_count = {str(row.issue_id): row.post_count for row in posts_count_result.fetchall()}
 
@@ -140,6 +141,7 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
             )
             .group_by(Issue.group_id)
         )
+
         pending_books_result = await db.execute(pending_books_query)
         pending_books_count = {str(row.group_id): row.pending_books_count for row in pending_books_result.fetchall()}
 
@@ -147,8 +149,8 @@ class FamilyGroupCRUD(BaseCRUD[FamilyGroup, FamilyGroupCreate, dict]):
         for group in groups:
             group_id_str = str(group.id)
             current_issue = current_issues.get(group_id_str)
-
             current_issue_posts = 0
+
             if current_issue:
                 current_issue_posts = posts_count.get(str(current_issue.id), 0)
 
