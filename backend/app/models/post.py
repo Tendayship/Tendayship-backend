@@ -14,7 +14,7 @@ class Post(Base, UUIDMixin, TimestampMixin):
     author_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     
     # 내용 (선택사항으로 변경)
-    content = Column(Text, nullable=True, comment="게시글 내용 (선택, 최대 100자)")
+    content = Column(Text, nullable=True, comment="게시글 내용 (선택, 50-100자)")
     
     # 이미지 정보 (필수, JSON 배열로 저장)
     # 최소 1장, 최대 4장 필수

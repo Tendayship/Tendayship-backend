@@ -41,9 +41,9 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
         content = getattr(post_data, 'content', None)
         if content:
             content = content.strip()
-            # 최대 100자 검증 (스키마에서 이미 처리되지만 추가 확인)
-            if len(content) > 100:
-                raise ValueError(f"소식 내용은 최대 100자까지 가능합니다 (현재: {len(content)}자)")
+            # 50~100자 검증 (스키마에서 이미 처리되지만 추가 확인)
+            if len(content) < 50 or len(content) > 100:
+                raise ValueError(f"소식 내용은 50~100자여야 합니다 (현재: {len(content)}자)")
         
         # Post 생성
         db_post = Post(
@@ -124,6 +124,8 @@ class PostCRUD(BaseCRUD[Post, PostCreate, PostUpdate]):
         # 텍스트 선택 검증
         if content is not None:
             content = content.strip()
+            if len(content) < 50:
+                return False, f"소식 내용은 최소 50자 이상이어야 합니다 (현재: {len(content)}자)"
             if len(content) > 100:
                 return False, f"소식 내용은 최대 100자까지 가능합니다 (현재: {len(content)}자)"
         
